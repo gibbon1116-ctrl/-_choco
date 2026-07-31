@@ -5,7 +5,7 @@
 ## 必要環境
 
 - Windows 10 / 11
-- Pythonのインストールは不要です。同梱の `python-3.12.8-embed-amd64` を使用します。
+- Pythonのインストールは不要です。同梱の `python-3.12.8-embed-amd64` を使用します。(GitHubから直接使う場合はPython 3.12が別途必要です。「GitHubから取得して使う場合」を参照)
 - アプリ利用時に外部サービスへ接続しません。
 
 ## セットアップ
@@ -24,6 +24,24 @@
 ## 起動方法
 
 `start_app.bat` をダブルクリックします。`shift_scheduler_app` フォルダ内の `run_app.bat` からも起動できます。黒い画面はアプリの実行中に必要なので閉じないでください。ブラウザが自動で開かない場合は、画面に表示される `http://localhost:8501` を開きます。
+
+## GitHubから取得して使う場合
+
+`python-3.12.8-embed-amd64` を含む配布フォルダ一式を使わず、GitHub上のソースコードから直接動かすこともできます。他のPCへ渡すときは、コピーするデータ量が少なく済みます。
+
+### 事前準備
+
+- そのPCに [Python 3.12](https://www.python.org/downloads/) をインストールします。インストール時に「Add python.exe to PATH」にチェックを入れてください。
+
+### 手順
+
+1. コードを取得します。
+   - `git clone https://github.com/gibbon1116-ctrl/-_choco.git`
+   - またはGitHubページの緑色「Code」ボタン→「Download ZIP」で取得し、展開します。
+2. `shift_scheduler_app` フォルダ内の `setup_and_run.bat` をダブルクリックします。初回のみ仮想環境の作成とライブラリのインストールが自動で行われます(数分かかります)。2回目以降はそのままアプリが起動します。
+3. ブラウザが自動で開かない場合は、画面に表示される `http://localhost:8501` を開きます。
+
+この方法で入力したデータ(`data/shift_scheduler.sqlite`)はそのPC内だけに保存され、他のPCとは共有されません。GitHub上のコードが更新された後は、そのPCで `git pull` すれば最新版を取得できます。
 
 ## 最初に試す方法
 
@@ -95,7 +113,8 @@ shift_scheduler_app/
   outputs/               作成した勤務表Excel
   src/                   DB・ソルバー・検証・Excel・集計
   tests/                 自動テスト
-  run_app.bat            Windows起動用
+  run_app.bat            Windows起動用(同梱Python)
+  setup_and_run.bat      Windows起動用(GitHubから取得時、PC側のPythonを使用)
 python-3.12.8-embed-amd64/
   python.exe             同梱Python
   Lib/site-packages/     同梱ライブラリ
