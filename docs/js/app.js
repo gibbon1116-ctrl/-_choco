@@ -1,8 +1,11 @@
 import * as databaseApi from "./db/index.js";
 import * as calendarApi from "./utils/calendar.js";
+import * as stateApi from "./state.js";
+import * as routerApi from "./router.js";
+import * as monthSelectorApi from "./components/monthSelector.js";
 
 async function requestPersistentStorage() {
-  if (!navigator.storage?.persist) {
+  if (!globalThis.navigator?.storage?.persist) {
     console.info("永続ストレージAPIは利用できません。");
     return false;
   }
@@ -15,22 +18,154 @@ async function requestPersistentStorage() {
 globalThis.shiftScheduler = Object.freeze({
   ...databaseApi,
   ...calendarApi,
+  ...stateApi,
+  ...routerApi,
+  ...monthSelectorApi,
 });
 
-try {
-  await Promise.all([
-    databaseApi.openDatabase(),
-    requestPersistentStorage(),
-  ]);
-  console.info("勤務表メーカー Phase 1 のデータ層を初期化しました。");
-} catch (error) {
-  console.error("勤務表メーカーの初期化に失敗しました。", error);
+function element(tagName, className, textContent = "") {
+  const node = document.createElement(tagName);
+  if (className) {
+    node.className = className;
+  }
+  if (textContent) {
+    node.textContent = textContent;
+  }
+  return node;
 }
 
-const app = document.querySelector("#app");
+function createNavigation(shell) {
+  const navigation = element("nav", "sidebar-nav");
+  navigation.setAttribute("aria-label", "メニュー");
 
-if (app) {
-  const message = document.createElement("p");
-  message.textContent = "勤務表メーカー（ブラウザ版・実装中）";
-  app.append(message);
+  for (const route of routerApi.ROUTES) {
+    const link = element("a", "sidebar-nav__link", route.label);
+    link.href = route.hash;
+    link.dataset.route = route.id;
+    link.addEventListener("click", () => {
+      shell.classList.remove("sidebar-open");
+    });
+    navigation.append(link);
+  }
+  return navigation;
 }
+
+function createApplicationShell() {
+  const shell = element("div", "app-shell");
+
+  const sidebar = element("aside", "sidebar");
+  const brand = element("div", "sidebar-brand");
+  const brandTitle = element("p", "sidebar-brand__title", "📅 勤務表メーカー");
+  const brandCaption = element("p", "sidebar-brand__caption", "ブラウザ勤務表作成");
+  brand.append(brandTitle, brandCaption);
+  sidebar.append(
+    brand,
+    element("div", "sidebar-divider"),
+    createNavigation(shell),
+    element("p", "sidebar-footer", "データはこのブラウザ内に保存されます"),
+  );
+
+  const backdrop = element("button", "sidebar-backdrop");
+  backdrop.type = "button";
+  backdrop.setAttribute("aria-label", "メニューを閉じる");
+  backdrop.addEventListener("click", () => shell.classList.remove("sidebar-open"));
+
+  const main = element("div", "app-main");
+  const header = element("header", "app-header");
+  const menuButton = element("button", "mobile-menu-button", "☰");
+  menuButton.type = "button";
+  menuButton.setAttribute("aria-label", "メニューを開く");
+  menuButton.setAttribute("aria-controls", "app-sidebar");
+  menuButton.addEventListener("click", () => shell.classList.add("sidebar-open"));
+  sidebar.id = "app-sidebar";
+
+  const identity = element("div", "app-header__identity");
+  identity.append(
+    element("p", "app-header__eyebrow", "勤務表メーカー"),
+    element("p", "app-header__page"),
+  );
+  const actions = element("div", "app-header__actions");
+  actions.append(monthSelectorApi.createMonthSelector());
+  header.append(menuButton, identity, actions);
+
+  const content = element("main", "app-content");
+  content.id = "page-content";
+  content.tabIndex = -1;
+  main.append(header, content);
+  shell.append(sidebar, backdrop, main);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      shell.classList.remove("sidebar-open");
+    }
+  });
+
+  return shell;
+}
+
+function renderPlaceholder(route, shell) {
+  const content = shell.querySelector("#page-content");
+  const headerTitle = shell.querySelector(".app-header__page");
+  headerTitle.textContent = route.label;
+
+  for (const link of shell.querySelectorAll(".sidebar-nav__link")) {
+    const isActive = link.dataset.route === route.id;
+    link.classList.toggle("is-active", isActive);
+    if (isActive) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  }
+
+  const section = element("section", "placeholder-page");
+  const heading = element("h1", "page-heading", route.label);
+  const headingId = `page-heading-${route.id}`;
+  heading.id = headingId;
+  section.setAttribute("aria-labelledby", headingId);
+  section.append(
+    heading,
+    element("p", "page-caption", "画面の基本機能は後続フェーズで実装します。"),
+  );
+
+  const card = element("div", "placeholder-card");
+  card.append(
+    element("p", "placeholder-card__status", "Phase 2"),
+    element("h2", "placeholder-card__title", `${route.label} — 準備中`),
+    element(
+      "p",
+      "placeholder-card__copy",
+      "現在はアプリの枠組み、画面切り替え、対象年月の共有状態を準備しています。",
+    ),
+  );
+  section.append(card);
+  content.replaceChildren(section);
+  document.title = `${route.label} | 勤務表メーカー`;
+}
+
+function mountApplication() {
+  const app = document.querySelector("#app");
+  if (!app) {
+    throw new Error("アプリのマウント先が見つかりません。");
+  }
+
+  monthSelectorApi.initializeTargetMonth();
+  const shell = createApplicationShell();
+  app.replaceChildren(shell);
+  routerApi.startRouter((route) => renderPlaceholder(route, shell));
+}
+
+async function initializeDataLayer() {
+  try {
+    await Promise.all([
+      databaseApi.openDatabase(),
+      requestPersistentStorage(),
+    ]);
+    console.info("勤務表メーカー Phase 2 を初期化しました。");
+  } catch (error) {
+    console.error("勤務表メーカーの初期化に失敗しました。", error);
+  }
+}
+
+mountApplication();
+void initializeDataLayer();

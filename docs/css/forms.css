@@ -1,0 +1,213 @@
+.month-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.month-selector__label {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.month-selector__select,
+.app-input,
+.app-select,
+.app-textarea {
+  min-height: 2.45rem;
+  padding: 0.42rem 2.2rem 0.42rem 0.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  color: var(--color-text-secondary);
+}
+
+.month-selector__select {
+  min-width: 132px;
+  font-weight: 700;
+}
+
+.month-selector__select:hover,
+.app-input:hover,
+.app-select:hover,
+.app-textarea:hover {
+  border-color: var(--color-muted);
+}
+
+.month-selector__select:focus-visible,
+.app-input:focus-visible,
+.app-select:focus-visible,
+.app-textarea:focus-visible,
+.app-button:focus-visible,
+.tb-seg-btn:focus-visible,
+.tb-nav-btn:focus-visible,
+.tb-primary-btn:focus-visible,
+.tb-secondary-btn:focus-visible {
+  outline: 3px solid rgb(0 140 149 / 22%);
+  outline-offset: 2px;
+}
+
+.app-button,
+.tb-primary-btn,
+.tb-secondary-btn {
+  min-height: 2.6rem;
+  padding: 0.42rem 1.1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.app-button--primary,
+.tb-primary-btn {
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-white);
+}
+
+.app-button--primary:hover,
+.tb-primary-btn:hover {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+.app-button--secondary,
+.tb-secondary-btn {
+  border: 1px solid var(--color-line);
+  background: var(--color-white);
+  color: var(--color-text-secondary);
+}
+
+.app-button--secondary:hover,
+.tb-secondary-btn:hover {
+  background: var(--color-surface-subtle);
+}
+
+.dash-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0;
+  margin-bottom: 0.3rem;
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tb-seg {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.tb-seg-btn {
+  padding: 0.32rem 0.85rem;
+  border: 0;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-white);
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.tb-seg-btn:last-child {
+  border-right: 0;
+}
+
+.tb-seg-btn.active {
+  background: var(--color-accent);
+  color: var(--color-white);
+}
+
+.tb-seg-btn:hover:not(.active),
+.tb-nav-btn:hover {
+  background: var(--color-surface-subtle);
+}
+
+.tb-nav-btn {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.tb-month {
+  min-width: 110px;
+  color: var(--color-navy);
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.tb-spacer {
+  flex: 1;
+}
+
+.app-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+}
+
+.app-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.app-table th,
+.app-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--color-grid-line);
+  text-align: left;
+}
+
+.app-table th {
+  background: var(--color-header-bg);
+  color: var(--color-text-secondary);
+  font-weight: 700;
+}
+
+.app-table tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 768px) {
+  .month-selector__label {
+    display: none;
+  }
+
+  .month-selector__select {
+    min-width: 112px;
+    min-height: 2.25rem;
+    padding-left: 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  .dash-toolbar {
+    gap: 0.35rem;
+  }
+
+  .tb-primary-btn,
+  .tb-secondary-btn {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+  }
+}
