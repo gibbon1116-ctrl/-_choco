@@ -10,6 +10,12 @@ import * as solverModelApi from "./solver/buildModel.js";
 import * as solverConfigApi from "./solver/config.js";
 import * as linearizationApi from "./solver/linearization.js";
 import * as solverApi from "./solver/runSolver.js";
+import * as summariesApi from "./reports/summaries.js";
+import * as restaurantChecksApi from "./reports/restaurantChecks.js";
+import * as viewModelApi from "./reports/viewModel.js";
+import * as scheduleTableApi from "./components/scheduleTable.js";
+import { renderHomePage } from "./pages/home.js";
+import { renderDashboardPage } from "./pages/dashboard.js";
 import { renderEmployeesPage } from "./pages/employees.js";
 import { renderShiftTypesPage } from "./pages/shiftTypes.js";
 import { renderRequirementsPage } from "./pages/requirements.js";
@@ -43,6 +49,10 @@ globalThis.shiftScheduler = Object.freeze({
   ...solverConfigApi,
   ...linearizationApi,
   ...solverApi,
+  ...summariesApi,
+  ...restaurantChecksApi,
+  ...viewModelApi,
+  ...scheduleTableApi,
 });
 
 function element(tagName, className, textContent = "") {
@@ -142,6 +152,14 @@ async function renderRoute(route, shell) {
   }
 
   document.title = `${route.label} | 勤務表メーカー`;
+  if (route.id === "home") {
+    await renderHomePage(content);
+    return;
+  }
+  if (route.id === "dashboard") {
+    await renderDashboardPage(content);
+    return;
+  }
   if (route.id === "employees") {
     await renderEmployeesPage(content);
     return;
@@ -216,7 +234,7 @@ function mountApplication() {
   stateApi.subscribe((next, previous) => {
     if (
       next.targetMonth !== previous.targetMonth
-      && ["requirements", "requests", "campaigns", "roles"].includes(currentRoute.id)
+      && ["home", "dashboard", "requirements", "requests", "campaigns", "roles"].includes(currentRoute.id)
     ) {
       void renderRoute(currentRoute, shell);
     }
@@ -229,7 +247,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 8 を初期化しました。");
+    console.info("勤務表メーカー Phase 9 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }
