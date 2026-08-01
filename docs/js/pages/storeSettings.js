@@ -1,4 +1,6 @@
 import { getSettings, saveSettings } from "../db/index.js";
+import { exportAllData, importAllData } from "../db/backup.js";
+import { getStorageStatus, requestStoragePersistence } from "../utils/storage.js";
 import {
   SKILL_DEFINITIONS,
   skillLevelChoices,
@@ -21,6 +23,125 @@ const PRIORITY_OPTIONS = Object.freeze([
 ]);
 
 let renderVersion = 0;
+
+function formatBytes(value) {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+async function updateStorageStatus(persistedValue, estimateValue) {
+  if (!navigator.storage) {
+    persistedValue.textContent = "このブラウザではStorage APIを利用できません。";
+    estimateValue.textContent = "使用量を取得できません。";
+    return;
+  }
+  try {
+    const status = await getStorageStatus();
+    persistedValue.textContent = status.persisted ? "許可済み" : "未許可";
+    estimateValue.textContent = `${formatBytes(status.usage)} / ${formatBytes(status.quota)}`;
+  } catch (error) {
+    persistedValue.textContent = "取得できませんでした。";
+    estimateValue.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function createDataManagementSection(container) {
+  const section = element("section", "crud-card data-management-card");
+  const header = element("div", "crud-card__header");
+  const title = element("div");
+  title.append(
+    element("h2", "crud-card__title", "データ管理"),
+    element("p", "crud-form__caption", "ブラウザ内データの保存状況、バックアップ、復元を管理します。"),
+  );
+  header.append(title);
+  const messageRegion = element("div", "form-message-region data-management-message");
+  const statusGrid = element("div", "storage-status-grid");
+  const persistedCard = element("div", "storage-status-card");
+  const persistedValue = element("strong", "storage-status-card__value", "確認中…");
+  persistedCard.append(element("span", "storage-status-card__label", "永続ストレージ"), persistedValue);
+  const estimateCard = element("div", "storage-status-card");
+  const estimateValue = element("strong", "storage-status-card__value", "確認中…");
+  estimateCard.append(element("span", "storage-status-card__label", "使用中 / 割当上限"), estimateValue);
+  statusGrid.append(persistedCard, estimateCard);
+
+  const actions = element("div", "data-management-actions");
+  const persistButton = createButton("永続化を再リクエスト", { variant: "secondary" });
+  const backupButton = createButton("バックアップをダウンロード", { variant: "primary" });
+  const restoreButton = createButton("バックアップから復元", { variant: "secondary" });
+  const fileInput = element("input", "visually-hidden");
+  fileInput.type = "file";
+  fileInput.accept = ".json,application/json";
+
+  persistButton.addEventListener("click", async () => {
+    persistButton.disabled = true;
+    try {
+      if (!navigator.storage?.persist) throw new Error("このブラウザでは永続化をリクエストできません。");
+      const persisted = await requestStoragePersistence();
+      showAlert(
+        messageRegion,
+        persisted ? "永続ストレージが許可されました。" : "永続ストレージは許可されませんでした。",
+        persisted ? "success" : "warning",
+      );
+      await updateStorageStatus(persistedValue, estimateValue);
+    } catch (error) {
+      showAlert(messageRegion, error.message || "永続化をリクエストできませんでした。");
+    } finally {
+      persistButton.disabled = false;
+    }
+  });
+
+  backupButton.addEventListener("click", async () => {
+    backupButton.disabled = true;
+    try {
+      const backup = await exportAllData({ download: true });
+      showAlert(
+        messageRegion,
+        `10ストアのバックアップを作成しました（${backup.exportedAt}）。`,
+        "success",
+      );
+      await updateStorageStatus(persistedValue, estimateValue);
+    } catch (error) {
+      showAlert(messageRegion, error.message || "バックアップを作成できませんでした。");
+    } finally {
+      backupButton.disabled = false;
+    }
+  });
+
+  restoreButton.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const confirmed = globalThis.confirm(
+      "バックアップから復元すると、現在の全データが削除されます。復元を実行しますか？",
+    );
+    if (!confirmed) {
+      fileInput.value = "";
+      return;
+    }
+    restoreButton.disabled = true;
+    try {
+      const json = await file.text();
+      const restored = await importAllData(json);
+      const total = Object.values(restored).reduce((sum, count) => sum + count, 0);
+      await renderStoreSettingsPage(container, {
+        type: "success",
+        message: `バックアップから10ストア・${total}件を復元しました。`,
+      });
+    } catch (error) {
+      showAlert(messageRegion, error.message || "バックアップを復元できませんでした。");
+      restoreButton.disabled = false;
+      fileInput.value = "";
+    }
+  });
+
+  actions.append(persistButton, backupButton, restoreButton, fileInput);
+  section.append(header, messageRegion, statusGrid, actions);
+  void updateStorageStatus(persistedValue, estimateValue);
+  return section;
+}
 
 function normalizedSkillValue(definition, setting) {
   const options = skillLevelChoices(definition.code);
@@ -270,6 +391,6 @@ export async function renderStoreSettingsPage(container, notice = null) {
     noticeRegion,
   );
   if (notice) noticeRegion.append(createAlert(notice.message, notice.type));
-  page.append(createSettingsForm(settings, container));
+  page.append(createSettingsForm(settings, container), createDataManagementSection(container));
   container.replaceChildren(page);
 }

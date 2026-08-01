@@ -778,7 +778,53 @@
   top: 0;
 }
 
+.data-management-card {
+  margin-top: 1.25rem;
+}
+
+.data-management-message:empty {
+  display: none;
+}
+
+.storage-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+}
+
+.storage-status-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.storage-status-card__label {
+  color: var(--color-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.storage-status-card__value {
+  color: var(--color-navy);
+  font-size: 1rem;
+}
+
+.data-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  padding: 0 1.1rem 1.1rem;
+}
+
 @media (max-width: 768px) {
+  .storage-status-grid {
+    grid-template-columns: 1fr;
+  }
+
   .month-selector__label {
     display: none;
   }

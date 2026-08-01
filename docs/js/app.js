@@ -17,6 +17,8 @@ import * as scheduleTableApi from "./components/scheduleTable.js";
 import * as excelImportApi from "./excel/importers.js";
 import * as excelLightExportApi from "./excel/lightExporters.js";
 import * as excelScheduleExportApi from "./excel/scheduleExporter.js";
+import * as sampleDataApi from "./excel/sampleData.js";
+import * as storageApi from "./utils/storage.js";
 import { renderHomePage } from "./pages/home.js";
 import { renderDashboardPage } from "./pages/dashboard.js";
 import { renderEmployeesPage } from "./pages/employees.js";
@@ -59,6 +61,8 @@ globalThis.shiftScheduler = Object.freeze({
   ...excelImportApi,
   ...excelLightExportApi,
   ...excelScheduleExportApi,
+  ...sampleDataApi,
+  ...storageApi,
 });
 
 function element(tagName, className, textContent = "") {
@@ -253,7 +257,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 10 を初期化しました。");
+    console.info("勤務表メーカー Phase 11 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }

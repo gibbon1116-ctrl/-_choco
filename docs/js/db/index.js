@@ -58,3 +58,8 @@ export {
   latestSchedule,
   saveSchedule,
 } from "./schedules.js";
+export {
+  BACKUP_SCHEMA_VERSION,
+  exportAllData,
+  importAllData,
+} from "./backup.js";

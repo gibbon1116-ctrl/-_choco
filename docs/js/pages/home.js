@@ -3,6 +3,7 @@ import { createScheduleTable, createShiftLegend } from "../components/scheduleTa
 import { monthLabel } from "../components/monthSelector.js";
 import { buildScheduleViewModel } from "../reports/viewModel.js";
 import { getState } from "../state.js";
+import { loadSampleData } from "../excel/sampleData.js";
 import {
   createAlert,
   createButton,
@@ -31,7 +32,7 @@ function createMetrics(values) {
   return grid;
 }
 
-export async function renderHomePage(container) {
+export async function renderHomePage(container, notice = "") {
   const targetMonth = getState().targetMonth;
   const renderToken = Symbol("home-render");
   container._homeRenderToken = renderToken;
@@ -53,6 +54,7 @@ export async function renderHomePage(container) {
       `${monthLabel(targetMonth)}の登録状況と最新結果です。`,
       dashboardLink,
     ));
+    if (notice) section.append(createAlert(notice, "success"));
     section.append(createMetrics(registeredCounts));
 
     const guide = element("section", "home-guide-card");
@@ -63,8 +65,26 @@ export async function renderHomePage(container) {
     );
     const messageRegion = element("div", "home-sample-message");
     const sampleButton = createButton("サンプルデータを読み込む", { variant: "secondary" });
-    sampleButton.addEventListener("click", () => {
-      messageRegion.replaceChildren(createAlert("サンプルデータの読み込みはPhase 11で実装予定です。", "warning"));
+    sampleButton.addEventListener("click", async () => {
+      const confirmed = globalThis.confirm(
+        `${monthLabel(targetMonth)}へサンプルデータを読み込みます。対象月の必要人数・希望・役割設定と、配置相性・キャンペーンが置き換わります。実行しますか？`,
+      );
+      if (!confirmed) return;
+      sampleButton.disabled = true;
+      messageRegion.replaceChildren(createAlert("サンプルデータを読み込んでいます…", "success"));
+      try {
+        const loaded = await loadSampleData(targetMonth);
+        await renderHomePage(
+          container,
+          `サンプルデータを読み込みました（職員${loaded.employees}人・必要人数${loaded.requirements}件・希望${loaded.requests}件）。`,
+        );
+      } catch (error) {
+        sampleButton.disabled = false;
+        messageRegion.replaceChildren(createAlert(
+          error instanceof Error ? error.message : "サンプルデータを読み込めませんでした。",
+          "error",
+        ));
+      }
     });
     guide.append(guideCopy, sampleButton);
     section.append(guide, messageRegion);
