@@ -49,7 +49,7 @@ export async function precheck(targetMonth) {
   } catch {
     return [{
       severity: "error",
-      message: "対象年月は YYYY-MM 形式で指定してください。",
+      message: "対象年月は YYYY-MM 形式で指定してください。／対象年月を例「2026-08」の形式に修正してください。",
     }];
   }
   const validDates = new Set(validDateList);
@@ -66,52 +66,57 @@ export async function precheck(targetMonth) {
   const employeeIds = new Set(employees.map((employee) => employee.employee_id));
 
   if (!active.length) {
-    addIssue(issues, "error", "勤務対象の職員が登録されていません。");
+    addIssue(issues, "error", "勤務対象の職員が登録されていません。／職員マスタで勤務対象の職員を1人以上有効にしてください。");
   }
   if (!requirements.length) {
-    addIssue(issues, "error", `${targetMonth} の必要人数が登録されていません。`);
+    addIssue(issues, "error", `${targetMonth} の必要人数が登録されていません。／必要人数画面で対象月の必要人数を登録してください。`);
   }
 
   for (const requirement of requirements) {
     if (!validDates.has(requirement.date)) {
-      addIssue(issues, "error", `必要人数の日付 ${requirement.date} が対象年月外です。`);
+      addIssue(issues, "error", `必要人数の日付 ${requirement.date} が対象年月外です。／対象年月内の日付に修正するか、この必要人数を削除してください。`);
     }
     if (!shiftCodes.has(requirement.shift_code)) {
-      addIssue(issues, "error", `勤務区分 ${requirement.shift_code} が勤務区分マスタにありません。`);
+      addIssue(issues, "error", `勤務区分 ${requirement.shift_code} が勤務区分マスタにありません。／勤務区分マスタに追加するか、必要人数の勤務区分を登録済みのものに修正してください。`);
     }
     if (Number(requirement.required_count) < 0) {
-      addIssue(issues, "error", `${requirement.date} の必要人数が負の値です。`);
+      addIssue(issues, "error", `${requirement.date} の必要人数が負の値です。／必要人数を 0 人以上に修正してください。`);
     }
   }
 
   for (const request of requests) {
     if (!employeeIds.has(request.employee_id)) {
-      addIssue(issues, "error", `希望の職員ID ${request.employee_id} が職員マスタにありません。`);
+      addIssue(issues, "error", `希望の職員ID ${request.employee_id} が職員マスタにありません。／職員を登録するか、この希望の職員を登録済みの職員に修正してください。`);
     }
     if (!validDates.has(request.date)) {
-      addIssue(issues, "error", `希望の日付 ${request.date} が対象年月外です。`);
+      addIssue(issues, "error", `希望の日付 ${request.date} が対象年月外です。／対象年月内の日付に修正するか、この希望を削除してください。`);
     }
     if (request.shift_code && !shiftCodes.has(request.shift_code)) {
-      addIssue(issues, "error", `希望の勤務区分 ${request.shift_code} が勤務区分マスタにありません。`);
+      addIssue(issues, "error", `希望の勤務区分 ${request.shift_code} が勤務区分マスタにありません。／勤務区分マスタに追加するか、この希望を登録済みの勤務区分に修正してください。`);
     }
     if (!REQUEST_TYPES.has(request.request_type)) {
-      addIssue(issues, "error", `希望種別 ${request.request_type} は使用できません。`);
+      addIssue(issues, "error", `希望種別 ${request.request_type} は使用できません。／希望種別を「希望休」「避けたい勤務」「希望勤務」「勤務指定」のいずれかに修正してください。`);
     }
     if (!PRIORITIES.has(request.priority)) {
-      addIssue(issues, "error", `優先度 ${request.priority} は hard または soft にしてください。`);
+      addIssue(issues, "error", `優先度 ${request.priority} は hard または soft にしてください。／優先度を「必須」または「できる限り」に修正してください。`);
     }
   }
 
   const hardByPersonDay = new Map();
+  const hardAvoidedByPersonDay = new Map();
   for (const request of requests) {
     if (request.priority !== "hard") continue;
     const key = personDayKey(request.employee_id, request.date);
     const requested = request.request_type === "off"
       ? "O"
       : (request.shift_code || "O");
-    if (["off", "fixed"].includes(request.request_type)) {
+    if (["off", "fixed", "prefer"].includes(request.request_type)) {
       if (!hardByPersonDay.has(key)) hardByPersonDay.set(key, new Set());
       hardByPersonDay.get(key).add(requested);
+    }
+    if (request.request_type === "avoid") {
+      if (!hardAvoidedByPersonDay.has(key)) hardAvoidedByPersonDay.set(key, new Set());
+      hardAvoidedByPersonDay.get(key).add(requested);
     }
   }
   for (const [key, codes] of hardByPersonDay) {
@@ -120,7 +125,19 @@ export async function precheck(targetMonth) {
     addIssue(
       issues,
       "error",
-      `${employeeId} の ${day} に矛盾する hard 希望（${[...codes].sort().join(", ")}）があります。`,
+      `${employeeId} の ${day} に矛盾する hard 希望（${[...codes].sort().join(", ")}）があります。／同じ職員・同じ日の hard 希望のどちらかを削除するか、優先度を「できる限り」に変更してください。`,
+    );
+  }
+  for (const [key, pinnedCodes] of hardByPersonDay) {
+    const avoidedCodes = hardAvoidedByPersonDay.get(key);
+    if (!avoidedCodes) continue;
+    const conflicts = [...pinnedCodes].filter((code) => avoidedCodes.has(code)).sort();
+    if (!conflicts.length) continue;
+    const [employeeId, day] = key.split(KEY_SEPARATOR);
+    addIssue(
+      issues,
+      "error",
+      `${employeeId} の ${day} は hard 希望で ${conflicts.join(", ")} に固定されていますが、同じ勤務区分を避ける hard 希望もあります。／競合する hard 希望のどちらかを削除するか、優先度を「できる限り」に変更してください。`,
     );
   }
 
@@ -131,7 +148,10 @@ export async function precheck(targetMonth) {
   );
   const hardFixed = new Map();
   for (const request of requests) {
-    if (request.priority === "hard" && request.request_type === "fixed") {
+    if (
+      request.priority === "hard"
+      && ["fixed", "prefer"].includes(request.request_type)
+    ) {
       hardFixed.set(personDayKey(request.employee_id, request.date), request.shift_code);
     }
   }
@@ -148,7 +168,7 @@ export async function precheck(targetMonth) {
       addIssue(
         issues,
         "error",
-        `${day} は合計 ${total} 人必要ですが、勤務対象者は ${active.length} 人です。`,
+        `${day} は合計 ${total} 人必要ですが、勤務対象者は ${active.length} 人です。／この日の必要人数を減らすか、勤務対象の職員を増やしてください。`,
       );
     }
     for (const requirement of rows) {
@@ -163,7 +183,7 @@ export async function precheck(targetMonth) {
         addIssue(
           issues,
           "error",
-          `${day} の ${requirement.shift_code} は ${requirement.required_count} 人必要ですが、割当可能候補は ${eligible.length} 人です。`,
+          `${day} の ${requirement.shift_code} は ${requirement.required_count} 人必要ですが、割当可能候補は ${eligible.length} 人です。／必要人数を減らすか、該当日の hard 希望・夜勤可否・勤務対象設定を見直してください。`,
         );
       }
     }
@@ -181,7 +201,7 @@ export async function precheck(targetMonth) {
     addIssue(
       issues,
       "error",
-      `月間必要勤務数 ${totalRequired} が職員の最大勤務日数合計 ${totalCapacity} を超えています。`,
+      `月間必要勤務数 ${totalRequired} が職員の最大勤務日数合計 ${totalCapacity} を超えています。／月間の必要人数を減らすか、職員の最大勤務日数または勤務対象者を増やしてください。`,
     );
   }
 
@@ -206,14 +226,18 @@ export async function precheck(targetMonth) {
       addIssue(
         issues,
         english.priority === "hard" ? "error" : "warning",
-        "店舗設定の最低英語レベルを満たすスタッフが登録されていません。",
+        english.priority === "hard"
+          ? "店舗設定の最低英語レベルを満たすスタッフが登録されていません。／条件を満たす職員を登録するか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。"
+          : "店舗設定の最低英語レベルを満たすスタッフが登録されていません。",
       );
     }
     if (requiresEnglish && englishStaff.length < english.required_count) {
       addIssue(
         issues,
         english.priority === "hard" ? "error" : "warning",
-        `最低英語レベルを満たす対応者は ${english.required_count} 人必要ですが、登録は ${englishStaff.length} 人です。`,
+        english.priority === "hard"
+          ? `最低英語レベルを満たす対応者は ${english.required_count} 人必要ですが、登録は ${englishStaff.length} 人です。／英語対応者を増やすか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。`
+          : `最低英語レベルを満たす対応者は ${english.required_count} 人必要ですが、登録は ${englishStaff.length} 人です。`,
       );
     }
 
@@ -231,7 +255,7 @@ export async function precheck(targetMonth) {
         addIssue(
           issues,
           "error",
-          `${definition.label}は${skillLevelLabel(definition.code, current.minimum_level)}以上が${current.required_count} 人必要ですが、対応可能者は ${eligible.length} 人です。`,
+          `${definition.label}は${skillLevelLabel(definition.code, current.minimum_level)}以上が${current.required_count} 人必要ですが、対応可能者は ${eligible.length} 人です。／対応可能な職員を増やすか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。`,
         );
       }
     }
@@ -242,20 +266,20 @@ export async function precheck(targetMonth) {
       requirements.some((row) => row.shift_code === "E" && Number(row.required_count) > 0)
       && !openers.length
     ) {
-      addIssue(issues, "error", "早番が必要ですが、開店作業可能なスタッフがいません。");
+      addIssue(issues, "error", "早番が必要ですが、開店作業可能なスタッフがいません。／職員に開店作業の役割を設定するか、早番の必要人数を 0 人にしてください。");
     }
     if (
       requirements.some((row) => row.shift_code === "L" && Number(row.required_count) > 0)
       && !closers.length
     ) {
-      addIssue(issues, "error", "遅番が必要ですが、閉店作業可能なスタッフがいません。");
+      addIssue(issues, "error", "遅番が必要ですが、閉店作業可能なスタッフがいません。／職員に閉店作業の役割を設定するか、遅番の必要人数を 0 人にしてください。");
     }
     if (
       active.length
       && active.every((employee) => Boolean(employee.is_new_staff))
       && requirements.some((row) => Number(row.required_count) > 0)
     ) {
-      addIssue(issues, "error", "勤務対象者が全員新人のため、新人だけの勤務を回避できません。");
+      addIssue(issues, "error", "勤務対象者が全員新人のため、新人だけの勤務を回避できません。／経験者を勤務対象に追加するか、職員の新人設定を見直してください。");
     }
 
     const allergy = skillSetting(settings, "allergy_support");
@@ -266,7 +290,9 @@ export async function precheck(targetMonth) {
       addIssue(
         issues,
         allergy.priority === "hard" ? "error" : "warning",
-        "アレルギー説明対応可能なスタッフが登録されていません。",
+        allergy.priority === "hard"
+          ? "アレルギー説明対応可能なスタッフが登録されていません。／職員にアレルギー説明対応の役割を設定するか、必要人数を下げるか、優先度を「できる限り」に変更してください。"
+          : "アレルギー説明対応可能なスタッフが登録されていません。",
       );
     }
     if (
@@ -313,10 +339,13 @@ export async function precheck(targetMonth) {
       );
       const requiredCount = Math.max(1, newProduct.required_count);
       if (skilled.length < requiredCount) {
+        const isHard = newProduct.required_count > 0 && newProduct.priority === "hard";
         addIssue(
           issues,
-          newProduct.required_count > 0 && newProduct.priority === "hard" ? "error" : "warning",
-          `新商品「${campaign.product_name}」に必要な能力のスタッフが ${requiredCount} 人必要ですが、登録は ${skilled.length} 人です。`,
+          isHard ? "error" : "warning",
+          isHard
+            ? `新商品「${campaign.product_name}」に必要な能力のスタッフが ${requiredCount} 人必要ですが、登録は ${skilled.length} 人です。／対応可能な職員を増やすか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。`
+            : `新商品「${campaign.product_name}」に必要な能力のスタッフが ${requiredCount} 人必要ですが、登録は ${skilled.length} 人です。`,
         );
       }
     }
@@ -326,7 +355,7 @@ export async function precheck(targetMonth) {
         addIssue(
           issues,
           "error",
-          `役割別必要人数の日付 ${requirement.date} が対象年月外です。`,
+          `役割別必要人数の日付 ${requirement.date} が対象年月外です。／対象年月内の日付に修正するか、この役割条件を削除してください。`,
         );
         continue;
       }
@@ -334,7 +363,7 @@ export async function precheck(targetMonth) {
         addIssue(
           issues,
           "error",
-          `役割条件の勤務区分 ${requirement.shift_code} がマスタにありません。`,
+          `役割条件の勤務区分 ${requirement.shift_code} がマスタにありません。／勤務区分マスタに追加するか、役割条件を登録済みの勤務区分に修正してください。`,
         );
         continue;
       }
@@ -343,20 +372,23 @@ export async function precheck(targetMonth) {
         addIssue(
           issues,
           "error",
-          `${requirement.date} ${requirement.shift_code} の役割 ${requirement.role_code} は ${requirement.required_count} 人必要ですが、対応可能者は ${eligible.length} 人です。`,
+          `${requirement.date} ${requirement.shift_code} の役割 ${requirement.role_code} は ${requirement.required_count} 人必要ですが、対応可能者は ${eligible.length} 人です。／対応可能な職員を増やすか、役割の必要人数を減らすか、優先度を「できる限り」に変更してください。`,
         );
       }
     }
 
     const fixedLookup = new Map();
     for (const request of requests) {
-      if (request.priority === "hard" && request.request_type === "fixed") {
+      if (
+        request.priority === "hard"
+        && ["fixed", "prefer"].includes(request.request_type)
+      ) {
         fixedLookup.set(personDayKey(request.employee_id, request.date), request.shift_code);
       }
     }
     for (const relation of relations) {
       if (relation.employee_id_1 === relation.employee_id_2) {
-        addIssue(issues, "error", "スタッフ配置条件に同じスタッフ同士の組み合わせがあります。");
+        addIssue(issues, "error", "スタッフ配置条件に同じスタッフ同士の組み合わせがあります。／この配置条件を削除するか、異なる2人の職員を指定してください。");
       }
       if (relation.relation_type === "never_together" && relation.priority === "hard") {
         for (const day of validDates) {
@@ -366,7 +398,7 @@ export async function precheck(targetMonth) {
             addIssue(
               issues,
               "error",
-              `${day} の同時配置禁止と必須の勤務指定が矛盾しています（${relation.employee_id_1}・${relation.employee_id_2}）。`,
+              `${day} の同時配置禁止と必須の勤務指定が矛盾しています（${relation.employee_id_1}・${relation.employee_id_2}）。／同時配置禁止またはいずれかの hard 希望を削除するか、優先度を「できる限り」に変更してください。`,
             );
             break;
           }

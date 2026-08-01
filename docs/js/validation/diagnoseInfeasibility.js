@@ -110,7 +110,10 @@ export async function diagnoseInfeasibility(targetMonth) {
   );
   const hardFixed = new Map();
   for (const request of requests) {
-    if (request.priority === "hard" && request.request_type === "fixed") {
+    if (
+      request.priority === "hard"
+      && ["fixed", "prefer"].includes(request.request_type)
+    ) {
       hardFixed.set(personDayKey(request.employee_id, request.date), request.shift_code);
     }
   }
@@ -128,13 +131,13 @@ export async function diagnoseInfeasibility(targetMonth) {
     );
     if (minimum > available) {
       add(
-        `${name}（${employeeId}）は最低 ${minimum} 日勤務ですが、hard の休み希望を除くと勤務可能日は ${available} 日です。`,
+        `${name}（${employeeId}）は最低 ${minimum} 日勤務ですが、hard の休み希望を除くと勤務可能日は ${available} 日です。／この職員の当月の hard 休み希望を減らすか、最低勤務日数を下げてください。`,
         { condition: "月間最低勤務日数とhard休み希望" },
       );
     }
     if (minimum > maximum) {
       add(
-        `${name}（${employeeId}）の最低勤務日数 ${minimum} 日が最大勤務日数 ${maximum} 日を超えています。`,
+        `${name}（${employeeId}）の最低勤務日数 ${minimum} 日が最大勤務日数 ${maximum} 日を超えています。／最低勤務日数を下げるか、最大勤務日数を上げてください。`,
         { condition: "月間勤務日数の上下限" },
       );
     }
@@ -162,7 +165,7 @@ export async function diagnoseInfeasibility(targetMonth) {
         && daysBetween(runStart, runEnd) + 1 > maxConsecutive
       ) {
         add(
-          `${name}（${employeeId}）は ${runStart}〜${runEnd} に hard の勤務指定が連続しており、最大連続勤務 ${maxConsecutive} 日を超えています。`,
+          `${name}（${employeeId}）は ${runStart}〜${runEnd} に hard の勤務指定が連続しており、最大連続勤務 ${maxConsecutive} 日を超えています。／期間内の hard 希望を削除・「できる限り」に変更するか、最大連続勤務日数を増やしてください。`,
           { day: `${runStart}〜${runEnd}`, condition: "最大連続勤務日数" },
         );
       }
@@ -181,13 +184,13 @@ export async function diagnoseInfeasibility(targetMonth) {
       }
       if ((requirementMap.get(requirementKey(day, code)) ?? 0) === 0) {
         add(
-          `${day} は ${code} の必要人数が 0 人ですが、${name}（${employeeId}）に hard の ${code} 勤務指定があります。`,
+          `${day} は ${code} の必要人数が 0 人ですが、${name}（${employeeId}）に hard の ${code} 勤務指定があります。／この日の ${code} の必要人数を増やすか、この hard 希望を削除・「できる限り」に変更してください。`,
           { day, condition: "hard勤務指定と必要人数" },
         );
       }
       if (code === "N" && !employee.night_allowed) {
         add(
-          `${day} は夜勤指定ですが、${name}（${employeeId}）は夜勤不可に設定されています。`,
+          `${day} は夜勤指定ですが、${name}（${employeeId}）は夜勤不可に設定されています。／この職員を夜勤可に変更するか、夜勤の hard 希望を削除・別の勤務区分に変更してください。`,
           { day, condition: "夜勤可否とhard勤務指定" },
         );
       }
@@ -196,7 +199,7 @@ export async function diagnoseInfeasibility(targetMonth) {
         const nextCode = hardFixed.get(personDayKey(employeeId, nextDay));
         if (nextCode && nextCode !== "O") {
           add(
-            `${day} の ${code} は翌日休みが必要ですが、${nextDay} に hard の ${nextCode} 勤務指定があります。`,
+            `${day} の ${code} は翌日休みが必要ですが、${nextDay} に hard の ${nextCode} 勤務指定があります。／翌日の hard 希望を削除・「できる限り」に変更するか、いずれかの勤務区分を変更してください。`,
             { day: `${day}・${nextDay}`, condition: "勤務区分の翌日休み" },
           );
         }
@@ -236,14 +239,14 @@ export async function diagnoseInfeasibility(targetMonth) {
               && eligible.length < needed
             ) {
               add(
-                `${day} の ${code} は英語対応者が ${needed} 人必要ですが、候補者は ${eligible.length} 人です。`,
+                `${day} の ${code} は英語対応者が ${needed} 人必要ですが、候補者は ${eligible.length} 人です。／英語対応者を増やすか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。`,
                 { day, condition: "英語対応者の必要人数" },
               );
             }
           }
         } else if (eligible.length < needed) {
           add(
-            `${day} は英語対応者が ${needed} 人必要ですが、候補者は ${eligible.length} 人です。`,
+            `${day} は英語対応者が ${needed} 人必要ですが、候補者は ${eligible.length} 人です。／英語対応者を増やすか、必要レベル・人数を下げるか、優先度を「できる限り」に変更してください。`,
             { day, condition: "英語対応者の必要人数" },
           );
         }
@@ -271,7 +274,7 @@ export async function diagnoseInfeasibility(targetMonth) {
       if (Number(requirement.required_count) > eligible.length) {
         const label = roleNames[requirement.role_code] ?? requirement.role_code;
         add(
-          `${requirement.date} の ${requirement.shift_code} は ${label} が ${requirement.required_count} 人必要ですが、候補者は ${eligible.length} 人です。`,
+          `${requirement.date} の ${requirement.shift_code} は ${label} が ${requirement.required_count} 人必要ですが、候補者は ${eligible.length} 人です。／対応可能な職員を増やすか、役割の必要人数を減らすか、優先度を「できる限り」に変更してください。`,
           {
             day: requirement.date,
             condition: `役割別必要人数（${label}）`,

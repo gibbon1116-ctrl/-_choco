@@ -377,7 +377,13 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
     const dailyVariables = variablesForDay(employeeId, date);
 
     if (request.priority === "hard") {
-      if (request.request_type === "off" || shiftCode === "O") {
+      if (
+        request.request_type === "off"
+        || (
+          ["fixed", "prefer"].includes(request.request_type)
+          && shiftCode === "O"
+        )
+      ) {
         addHardConstraint(
           "H7",
           `h7_r${requestIndex}`,
@@ -385,13 +391,24 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           "=",
           0,
         );
-      } else if (request.request_type === "fixed" && shiftCodeSet.has(shiftCode)) {
+      } else if (
+        ["fixed", "prefer"].includes(request.request_type)
+        && shiftCodeSet.has(shiftCode)
+      ) {
         addHardConstraint(
           "H8",
           `h8_r${requestIndex}`,
           positiveTerms([variableFor(employeeId, date, shiftCode)]),
           "=",
           1,
+        );
+      } else if (request.request_type === "avoid" && shiftCodeSet.has(shiftCode)) {
+        addHardConstraint(
+          "H8",
+          `h8_r${requestIndex}`,
+          positiveTerms([variableFor(employeeId, date, shiftCode)]),
+          "=",
+          0,
         );
       }
       return;
