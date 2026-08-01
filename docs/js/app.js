@@ -4,6 +4,8 @@ import * as stateApi from "./state.js";
 import * as routerApi from "./router.js";
 import * as monthSelectorApi from "./components/monthSelector.js";
 import * as restaurantSkillsApi from "./utils/restaurantSkills.js";
+import * as precheckApi from "./validation/precheck.js";
+import * as diagnosisApi from "./validation/diagnoseInfeasibility.js";
 import { renderEmployeesPage } from "./pages/employees.js";
 import { renderShiftTypesPage } from "./pages/shiftTypes.js";
 import { renderRequirementsPage } from "./pages/requirements.js";
@@ -31,6 +33,8 @@ globalThis.shiftScheduler = Object.freeze({
   ...routerApi,
   ...monthSelectorApi,
   ...restaurantSkillsApi,
+  ...precheckApi,
+  ...diagnosisApi,
 });
 
 function element(tagName, className, textContent = "") {
@@ -217,7 +221,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 5 を初期化しました。");
+    console.info("勤務表メーカー Phase 6 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }
