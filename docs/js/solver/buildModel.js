@@ -728,6 +728,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
     const highDays = days.filter(
       (date) => ["high", "very_high"].includes(businessDays.get(date)?.demand_level),
     );
+    const mentorGroups = new Map();
     staffRelations.forEach((relation, relationIndex) => {
       if (!Boolean(relation.active)) return;
       const employeeId1 = String(relation.employee_id_1);
@@ -735,7 +736,38 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
       if (!employeeMap.has(employeeId1) || !employeeMap.has(employeeId2)) return;
       const weight = Math.max(0, integer(relation.weight));
       const relationName = `relation_${safeName(relation.id ?? relationIndex)}`;
-      if (["prefer_together", "mentor_pair", "prefer_peak_pair"].includes(
+      if (relation.relation_type === "mentor_pair") {
+        const employee1 = employeeMap.get(employeeId1);
+        const employee2 = employeeMap.get(employeeId2);
+        const employee1IsMentee = Boolean(employee1.is_new_staff)
+          && !Boolean(employee1.can_train_new_staff);
+        const employee1IsMentor = Boolean(employee1.can_train_new_staff)
+          && !Boolean(employee1.is_new_staff);
+        const employee2IsMentee = Boolean(employee2.is_new_staff)
+          && !Boolean(employee2.can_train_new_staff);
+        const employee2IsMentor = Boolean(employee2.can_train_new_staff)
+          && !Boolean(employee2.is_new_staff);
+        const firstToSecond = employee1IsMentee && employee2IsMentor;
+        const secondToFirst = employee2IsMentee && employee1IsMentor;
+        if (firstToSecond === secondToFirst) return;
+
+        const menteeId = firstToSecond ? employeeId1 : employeeId2;
+        const mentorId = firstToSecond ? employeeId2 : employeeId1;
+        const group = mentorGroups.get(menteeId) ?? {
+          mentors: new Set(),
+          hard: false,
+          softWeight: 0,
+        };
+        group.mentors.add(mentorId);
+        if (relation.priority === "hard") {
+          group.hard = true;
+        } else {
+          group.softWeight = Math.max(group.softWeight, weight);
+        }
+        mentorGroups.set(menteeId, group);
+        return;
+      }
+      if (["prefer_together", "prefer_peak_pair"].includes(
         relation.relation_type,
       )) {
         const selectedDays = relation.relation_type === "prefer_peak_pair" ? highDays : days;
@@ -770,6 +802,49 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           weight,
           `${relationName}_d${dayIndex}_c${shiftIndex}`,
         ));
+      });
+    });
+
+    mentorGroups.forEach((group, menteeId) => {
+      const mentorIds = [...group.mentors].filter((mentorId) => employeeMap.has(mentorId));
+      if (!mentorIds.length) return;
+      const menteeName = safeName(menteeId);
+      days.forEach((date, dayIndex) => {
+        shiftCodes.forEach((shiftCode, shiftIndex) => {
+          const menteeVariable = variableFor(menteeId, date, shiftCode);
+          const mentorVariables = mentorIds.map(
+            (mentorId) => variableFor(mentorId, date, shiftCode),
+          ).filter(Boolean);
+          if (!menteeVariable || !mentorVariables.length) return;
+          const suffix = `mentor_pair_${menteeName}_d${dayIndex}_c${shiftIndex}`;
+          if (group.hard) {
+            addHardConstraint(
+              "H12",
+              `h12_${suffix}`,
+              [
+                { coefficient: 1, variable: menteeVariable },
+                ...mentorVariables.map((variable) => ({ coefficient: -1, variable })),
+              ],
+              "<=",
+              0,
+            );
+            return;
+          }
+
+          const shortfall = `shortfall_${suffix}`;
+          model.addContinuousVariable(shortfall, { lower: 0, upper: 1 });
+          model.addSoftConstraint(
+            suffix,
+            [
+              ...positiveTerms(mentorVariables),
+              { coefficient: 1, variable: shortfall },
+              { coefficient: -1, variable: menteeVariable },
+            ],
+            ">=",
+            0,
+          );
+          model.addObjectiveTerm(shortfall, group.softWeight);
+        });
       });
     });
   }
