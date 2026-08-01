@@ -811,6 +811,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
       const menteeName = safeName(menteeId);
       days.forEach((date, dayIndex) => {
         shiftCodes.forEach((shiftCode, shiftIndex) => {
+          if ((requirementMap.get(requirementKey(date, shiftCode)) ?? 0) < 1) return;
           const menteeVariable = variableFor(menteeId, date, shiftCode);
           const mentorVariables = mentorIds.map(
             (mentorId) => variableFor(mentorId, date, shiftCode),
