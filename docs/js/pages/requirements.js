@@ -23,7 +23,7 @@ import {
 
 let renderVersion = 0;
 
-function createTemplateEditor(shifts, targetMonth, container) {
+function createTemplateEditor(shifts, targetMonth, container, gridHost, version) {
   const section = element("section", "crud-card requirements-template");
   const header = element("div", "crud-card__header");
   const titleGroup = element("div");
@@ -103,13 +103,15 @@ function createTemplateEditor(shifts, targetMonth, container) {
     applyButton.disabled = true;
     try {
       await replaceRequirements(targetMonth, rows);
-      await renderRequirementsPage(container, {
-        type: "success",
-        message: "テンプレートを適用しました。",
-      });
+      if (version !== renderVersion || container.dataset.page !== "requirements") return;
+      const requirements = await getRequirements(targetMonth);
+      if (version !== renderVersion || container.dataset.page !== "requirements") return;
+      gridHost.replaceChildren(createRequirementsGrid(shifts, requirements, targetMonth, container));
+      showAlert(messageRegion, "テンプレートを適用しました。", "success");
     } catch (error) {
-      applyButton.disabled = false;
       showAlert(messageRegion, error.message || "テンプレートを適用できませんでした。");
+    } finally {
+      applyButton.disabled = false;
     }
   });
   actions.append(applyButton);
@@ -242,9 +244,11 @@ export async function renderRequirementsPage(container, notice = null) {
   if (!workShifts.length) {
     page.append(element("p", "empty-state", "勤務扱いの勤務区分が登録されていません。"));
   } else {
+    const gridHost = element("div");
+    gridHost.append(createRequirementsGrid(workShifts, requirements, targetMonth, container));
     page.append(
-      createTemplateEditor(workShifts, targetMonth, container),
-      createRequirementsGrid(workShifts, requirements, targetMonth, container),
+      createTemplateEditor(workShifts, targetMonth, container, gridHost, version),
+      gridHost,
     );
   }
   container.replaceChildren(page);
