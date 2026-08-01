@@ -45,7 +45,7 @@
 .tb-nav-btn:focus-visible,
 .tb-primary-btn:focus-visible,
 .tb-secondary-btn:focus-visible {
-  outline: 3px solid rgb(0 140 149 / 22%);
+  outline: 3px solid var(--color-accent-hover);
   outline-offset: 2px;
 }
 
@@ -63,15 +63,15 @@
 
 .app-button--primary,
 .tb-primary-btn {
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent);
+  border: 1px solid var(--color-accent-hover);
+  background: var(--color-accent-hover);
   color: var(--color-white);
 }
 
 .app-button--primary:hover,
 .tb-primary-btn:hover {
-  border-color: var(--color-accent-hover);
-  background: var(--color-accent-hover);
+  border-color: var(--color-navy);
+  background: var(--color-navy);
 }
 
 .app-button--secondary,
@@ -392,7 +392,7 @@
 }
 
 .tb-seg-btn.active {
-  background: var(--color-accent);
+  background: var(--color-accent-hover);
   color: var(--color-white);
 }
 

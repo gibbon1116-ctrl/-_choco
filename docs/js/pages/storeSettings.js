@@ -74,6 +74,7 @@ function createDataManagementSection(container) {
   const fileInput = element("input", "visually-hidden");
   fileInput.type = "file";
   fileInput.accept = ".json,application/json";
+  fileInput.setAttribute("aria-label", "復元するバックアップJSONを選択");
 
   persistButton.addEventListener("click", async () => {
     persistButton.disabled = true;

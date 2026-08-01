@@ -1,0 +1,141 @@
+/* Phase 12: mobile shell and schedule-grid adjustments. */
+
+.schedule-table-container:focus-visible {
+  outline-color: var(--color-accent-hover);
+}
+
+@media (max-width: 768px) {
+  .app-shell.sidebar-open {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    width: min(86vw, var(--sidebar-width));
+    max-width: calc(100vw - 3rem);
+  }
+
+  .app-header {
+    gap: 0.55rem;
+  }
+
+  .app-header__page {
+    max-width: 9.5rem;
+  }
+
+  .dashboard-schedule-controls,
+  .dashboard-filter-row,
+  .dashboard-range-navigation,
+  .schedule-metadata,
+  .schedule-legend,
+  .dashboard-tabs {
+    gap: 0.4rem;
+  }
+
+  .dashboard-schedule-controls {
+    padding: 0.6rem;
+  }
+
+  .dashboard-view-modes,
+  .dashboard-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 0.2rem;
+    scrollbar-width: thin;
+  }
+
+  .dashboard-view-modes .app-button,
+  .dashboard-tab {
+    min-width: max-content;
+  }
+
+  .schedule-table-container {
+    max-width: 100%;
+    max-height: calc(100vh - 11rem);
+    border-radius: var(--radius-sm);
+  }
+
+  .schedule-table {
+    font-size: 0.7rem;
+  }
+
+  .schedule-table th,
+  .schedule-table td {
+    min-width: 64px;
+    height: 48px;
+    padding: 0.2rem;
+  }
+
+  .schedule-table thead th {
+    height: 52px;
+  }
+
+  .schedule-table .schedule-staff-column {
+    min-width: 92px;
+    max-width: 108px;
+  }
+
+  .schedule-date-day,
+  .schedule-staff-name {
+    font-size: 0.76rem;
+  }
+
+  .schedule-date-weekday,
+  .schedule-staff-role,
+  .schedule-shift-time {
+    font-size: 0.6rem;
+  }
+
+  .schedule-date-event {
+    max-width: 60px;
+    overflow: hidden;
+    font-size: 0.6rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .schedule-shift-badge {
+    min-height: 38px;
+    padding: 0.2rem 0.1rem;
+  }
+
+  .schedule-request-label,
+  .schedule-request-badge {
+    font-size: 0.56rem;
+  }
+
+  .schedule-skill-badge {
+    font-size: 0.5rem;
+  }
+
+  .schedule-legend-note {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .app-table {
+    font-size: 0.76rem;
+  }
+
+  .app-table th,
+  .app-table td {
+    padding: 0.48rem 0.42rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header__page {
+    max-width: 7rem;
+  }
+
+  .schedule-table th,
+  .schedule-table td {
+    min-width: 58px;
+  }
+
+  .schedule-table .schedule-staff-column {
+    min-width: 86px;
+    max-width: 96px;
+  }
+}

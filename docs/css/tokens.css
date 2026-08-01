@@ -73,6 +73,11 @@ a {
   color: inherit;
 }
 
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-accent-hover);
+  outline-offset: 2px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

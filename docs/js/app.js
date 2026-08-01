@@ -76,6 +76,12 @@ function element(tagName, className, textContent = "") {
   return node;
 }
 
+function setSidebarOpen(shell, open) {
+  shell.classList.toggle("sidebar-open", open);
+  const menuButton = shell.querySelector(".mobile-menu-button");
+  if (menuButton) menuButton.setAttribute("aria-expanded", String(open));
+}
+
 function createNavigation(shell) {
   const navigation = element("nav", "sidebar-nav");
   navigation.setAttribute("aria-label", "メニュー");
@@ -85,7 +91,7 @@ function createNavigation(shell) {
     link.href = route.hash;
     link.dataset.route = route.id;
     link.addEventListener("click", () => {
-      shell.classList.remove("sidebar-open");
+      setSidebarOpen(shell, false);
     });
     navigation.append(link);
   }
@@ -110,7 +116,7 @@ function createApplicationShell() {
   const backdrop = element("button", "sidebar-backdrop");
   backdrop.type = "button";
   backdrop.setAttribute("aria-label", "メニューを閉じる");
-  backdrop.addEventListener("click", () => shell.classList.remove("sidebar-open"));
+  backdrop.addEventListener("click", () => setSidebarOpen(shell, false));
 
   const main = element("div", "app-main");
   const header = element("header", "app-header");
@@ -118,7 +124,8 @@ function createApplicationShell() {
   menuButton.type = "button";
   menuButton.setAttribute("aria-label", "メニューを開く");
   menuButton.setAttribute("aria-controls", "app-sidebar");
-  menuButton.addEventListener("click", () => shell.classList.add("sidebar-open"));
+  menuButton.setAttribute("aria-expanded", "false");
+  menuButton.addEventListener("click", () => setSidebarOpen(shell, true));
   sidebar.id = "app-sidebar";
 
   const identity = element("div", "app-header__identity");
@@ -138,7 +145,7 @@ function createApplicationShell() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      shell.classList.remove("sidebar-open");
+      setSidebarOpen(shell, false);
     }
   });
 
@@ -257,7 +264,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 11 を初期化しました。");
+    console.info("勤務表メーカー Phase 12 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }
