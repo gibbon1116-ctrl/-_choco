@@ -254,6 +254,43 @@ export async function restaurantConditionChecks(
   const highDays = new Set(businessDayRows.filter(
     (row) => ["high", "very_high"].includes(row.demand_level),
   ).map((row) => String(row.date)));
+  const mentorGroups = new Map();
+  for (const relation of relations) {
+    if (relation.relation_type !== "mentor_pair") continue;
+    const employeeId1 = String(relation.employee_id_1);
+    const employeeId2 = String(relation.employee_id_2);
+    const employee1 = employees.get(employeeId1);
+    const employee2 = employees.get(employeeId2);
+    if (!employee1 || !employee2) continue;
+
+    const employee1IsMentee = Boolean(employee1.is_new_staff)
+      && !Boolean(employee1.can_train_new_staff);
+    const employee1IsMentor = Boolean(employee1.can_train_new_staff)
+      && !Boolean(employee1.is_new_staff);
+    const employee2IsMentee = Boolean(employee2.is_new_staff)
+      && !Boolean(employee2.can_train_new_staff);
+    const employee2IsMentor = Boolean(employee2.can_train_new_staff)
+      && !Boolean(employee2.is_new_staff);
+    const firstToSecond = employee1IsMentee && employee2IsMentor;
+    const secondToFirst = employee2IsMentee && employee1IsMentor;
+    if (firstToSecond === secondToFirst) continue;
+
+    const menteeId = firstToSecond ? employeeId1 : employeeId2;
+    const mentorId = firstToSecond ? employeeId2 : employeeId1;
+    const group = mentorGroups.get(menteeId) ?? {
+      mentors: new Set(),
+      hard: false,
+      softWeight: 0,
+    };
+    group.mentors.add(mentorId);
+    if (relation.priority === "hard") {
+      group.hard = true;
+    } else {
+      group.softWeight = Math.max(group.softWeight, Number(relation.weight) || 0);
+    }
+    mentorGroups.set(menteeId, group);
+  }
+
   for (const relation of relations) {
     const employeeId1 = String(relation.employee_id_1);
     const employeeId2 = String(relation.employee_id_2);
@@ -267,7 +304,7 @@ export async function restaurantConditionChecks(
       const violated = (
         (["avoid_together", "never_together"].includes(type) && same)
         || (type === "avoid_closing_pair" && same && shift1 === "L")
-        || (["prefer_together", "mentor_pair"].includes(type) && eitherWork && !bothWork)
+        || (type === "prefer_together" && eitherWork && !bothWork)
         || (type === "prefer_peak_pair" && highDays.has(day) && eitherWork && !bothWork)
       );
       if (violated) {
@@ -277,6 +314,31 @@ export async function restaurantConditionChecks(
           false,
           `${RELATION_LABELS[type] ?? type}（${employeeId1}・${employeeId2}）`,
           relation.priority,
+        );
+      }
+    }
+  }
+
+  const employeeLabel = (employeeId) => {
+    const name = String(employees.get(employeeId)?.name ?? "").trim();
+    return name ? `${name}（${employeeId}）` : employeeId;
+  };
+  for (const [menteeId, group] of mentorGroups) {
+    const mentorIds = [...group.mentors];
+    const mentorLabels = mentorIds.map(employeeLabel).join("、");
+    for (const day of allDays) {
+      const menteeShift = shiftFor.get(assignmentKey(menteeId, day)) ?? "O";
+      if (menteeShift === "O") continue;
+      const hasMentor = mentorIds.some(
+        (mentorId) => shiftFor.get(assignmentKey(mentorId, day)) === menteeShift,
+      );
+      if (!hasMentor) {
+        add(
+          day,
+          "スタッフ配置条件",
+          false,
+          `${RELATION_LABELS.mentor_pair}：新人 ${employeeLabel(menteeId)} のシフト ${menteeShift} に教育係（${mentorLabels}）がいません。`,
+          group.hard ? "hard" : "soft",
         );
       }
     }
