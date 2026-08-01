@@ -1,16 +1,20 @@
 import {
   getActiveEmployees,
+  getAllProductCampaigns,
   getAllShiftTypes,
+  getBusinessDays,
   getRequirements,
   getRequests,
+  getRoleRequirements,
   getSettings,
   getAllStaffRelations,
   saveSchedule,
 } from "../db/index.js";
 import { diagnoseInfeasibility } from "../validation/diagnoseInfeasibility.js";
 import { buildModel } from "./buildModel.js";
+import { SOLVER_CONFIG } from "./config.js";
 
-const DEFAULT_TIME_LIMIT_SECONDS = 60;
+const DEFAULT_TIME_LIMIT_SECONDS = SOLVER_CONFIG.solver_time_limit_seconds;
 const WORKER_GRACE_PERIOD_MS = 30_000;
 
 function timeLimit(value) {
@@ -30,13 +34,26 @@ export function createSolverWorker() {
 }
 
 export async function loadSolverData(targetMonth) {
-  const [employees, shiftTypes, requirements, requests, settings, staffRelations] = await Promise.all([
+  const [
+    employees,
+    shiftTypes,
+    requirements,
+    requests,
+    settings,
+    staffRelations,
+    businessDays,
+    campaigns,
+    roleRequirements,
+  ] = await Promise.all([
     getActiveEmployees(),
     getAllShiftTypes(),
     getRequirements(targetMonth),
     getRequests(targetMonth),
     getSettings(),
     getAllStaffRelations(),
+    getBusinessDays(targetMonth),
+    getAllProductCampaigns(),
+    getRoleRequirements(targetMonth),
   ]);
   return {
     employees,
@@ -45,6 +62,9 @@ export async function loadSolverData(targetMonth) {
     requests,
     settings,
     staffRelations,
+    businessDays,
+    campaigns,
+    roleRequirements,
   };
 }
 
@@ -150,7 +170,7 @@ export function solveModel(model, {
     worker.postMessage({
       id,
       lpString: model.lpString,
-      variableNames: model.variables.map(({ name }) => name),
+      variableNames: model.binaryVariables,
       options: { time_limit: seconds },
     });
   });
@@ -183,10 +203,11 @@ export async function runSolver(targetMonth, {
   workerFactory = createSolverWorker,
   diagnose = diagnoseInfeasibility,
   persistSchedule = saveSchedule,
+  buildOptions = {},
 } = {}) {
   try {
     const solverData = data ?? await loadSolverData(targetMonth);
-    const model = buildModel(targetMonth, solverData);
+    const model = buildModel(targetMonth, solverData, buildOptions);
     const result = await solveModel(model, { timeLimitSeconds, workerFactory });
 
     if (result.status === "success") {
@@ -195,7 +216,7 @@ export async function runSolver(targetMonth, {
         targetMonth,
         "success",
         assignments,
-        0,
+        result.objectiveValue,
         result.wallTimeMs,
         "",
       );
@@ -203,7 +224,7 @@ export async function runSolver(targetMonth, {
         ...result,
         assignments,
         diagnostics: [],
-        objectiveValue: 0,
+        objectiveValue: result.objectiveValue,
         scheduleId,
         modelStats: model.stats,
       };

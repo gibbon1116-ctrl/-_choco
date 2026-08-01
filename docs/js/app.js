@@ -7,6 +7,8 @@ import * as restaurantSkillsApi from "./utils/restaurantSkills.js";
 import * as precheckApi from "./validation/precheck.js";
 import * as diagnosisApi from "./validation/diagnoseInfeasibility.js";
 import * as solverModelApi from "./solver/buildModel.js";
+import * as solverConfigApi from "./solver/config.js";
+import * as linearizationApi from "./solver/linearization.js";
 import * as solverApi from "./solver/runSolver.js";
 import { renderEmployeesPage } from "./pages/employees.js";
 import { renderShiftTypesPage } from "./pages/shiftTypes.js";
@@ -38,6 +40,8 @@ globalThis.shiftScheduler = Object.freeze({
   ...precheckApi,
   ...diagnosisApi,
   ...solverModelApi,
+  ...solverConfigApi,
+  ...linearizationApi,
   ...solverApi,
 });
 
@@ -225,7 +229,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 7 を初期化しました。");
+    console.info("勤務表メーカー Phase 8 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }

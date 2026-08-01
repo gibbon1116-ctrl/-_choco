@@ -1,5 +1,24 @@
-import { monthDates } from "../utils/calendar.js";
-import { employeeHasRole } from "../utils/restaurantSkills.js";
+import {
+  isWeekend,
+  isoDate,
+  monthDates,
+  parseIsoDate,
+} from "../utils/calendar.js";
+import {
+  CATEGORY_SKILL_FIELDS,
+  SKILL_DEFINITIONS,
+  employeeHasRole,
+  employeeHasSkill,
+  englishLevelRank,
+} from "../utils/restaurantSkills.js";
+import { penalty } from "./config.js";
+import {
+  addAbsDiff,
+  addAndVar,
+  addMinimum,
+  addSpread,
+  addTargetDeviation,
+} from "./linearization.js";
 
 const KEY_SEPARATOR = "\u0000";
 
@@ -7,8 +26,8 @@ function requirementKey(date, shiftCode) {
   return `${date}${KEY_SEPARATOR}${shiftCode}`;
 }
 
-function personDayKey(employeeId, date) {
-  return `${employeeId}${KEY_SEPARATOR}${date}`;
+function variableKey(employeeId, date, shiftCode) {
+  return `${employeeId}${KEY_SEPARATOR}${date}${KEY_SEPARATOR}${shiftCode}`;
 }
 
 function integer(value, fallback = 0) {
@@ -16,9 +35,39 @@ function integer(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function formatTerms(terms) {
-  if (!terms.length) return "0";
+function addDays(value, offset) {
+  const date = parseIsoDate(value);
+  date.setDate(date.getDate() + offset);
+  return isoDate(date);
+}
 
+function safeName(value) {
+  return String(value).replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+function positiveTerms(variableNames) {
+  return variableNames.map((variable) => ({ coefficient: 1, variable }));
+}
+
+function normalizeTerms(terms) {
+  const coefficients = new Map();
+  for (const term of terms) {
+    if (!term?.variable) continue;
+    const coefficient = Number(term.coefficient ?? 1);
+    if (!Number.isFinite(coefficient) || coefficient === 0) continue;
+    coefficients.set(
+      term.variable,
+      (coefficients.get(term.variable) ?? 0) + coefficient,
+    );
+  }
+  return [...coefficients].filter(([, coefficient]) => coefficient !== 0).map(
+    ([variable, coefficient]) => ({ variable, coefficient }),
+  );
+}
+
+function formatTerms(inputTerms) {
+  const terms = normalizeTerms(inputTerms);
+  if (!terms.length) return "0";
   return terms.map(({ coefficient, variable }, index) => {
     const absolute = Math.abs(coefficient);
     const value = absolute === 1 ? variable : `${absolute} ${variable}`;
@@ -27,15 +76,123 @@ function formatTerms(terms) {
   }).join(" ");
 }
 
-function positiveTerms(variableNames) {
-  return variableNames.map((variable) => ({ coefficient: 1, variable }));
+class LpComposer {
+  constructor() {
+    this.constraints = [];
+    this.names = new Set();
+    this.binaryVariables = [];
+    this.binarySet = new Set();
+    this.continuousVariables = new Map();
+    this.objective = new Map();
+    this.objectiveConstant = 0;
+    this.softConstraintCount = 0;
+  }
+
+  uniqueName(name) {
+    const base = safeName(name);
+    let candidate = base;
+    let suffix = 2;
+    while (this.names.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    this.names.add(candidate);
+    return candidate;
+  }
+
+  addConstraint(name, terms, operator, rightHandSide) {
+    this.constraints.push(
+      ` ${this.uniqueName(name)}: ${formatTerms(terms)} ${operator} ${rightHandSide}`,
+    );
+  }
+
+  addSoftConstraint(name, terms, operator, rightHandSide) {
+    this.addConstraint(`s_${name}`, terms, operator, rightHandSide);
+    this.softConstraintCount += 1;
+  }
+
+  addBinaryVariable(name) {
+    if (this.binarySet.has(name)) return;
+    if (this.continuousVariables.has(name)) {
+      throw new Error(`変数 ${name} は既に連続変数として登録されています。`);
+    }
+    this.binarySet.add(name);
+    this.binaryVariables.push(name);
+  }
+
+  addContinuousVariable(name, bounds = {}) {
+    if (this.binarySet.has(name)) {
+      throw new Error(`変数 ${name} は既にバイナリ変数として登録されています。`);
+    }
+    if (!this.continuousVariables.has(name)) {
+      this.continuousVariables.set(name, {
+        lower: bounds.lower ?? 0,
+        upper: bounds.upper ?? Number.POSITIVE_INFINITY,
+      });
+    }
+  }
+
+  addObjectiveTerm(variable, coefficient) {
+    const value = Number(coefficient);
+    if (!Number.isFinite(value) || value === 0) return;
+    this.objective.set(variable, (this.objective.get(variable) ?? 0) + value);
+  }
+
+  addObjectiveConstant(value) {
+    const number = Number(value);
+    if (Number.isFinite(number)) this.objectiveConstant += number;
+  }
+
+  objectiveExpression() {
+    const terms = [...this.objective]
+      .filter(([, coefficient]) => coefficient !== 0)
+      .map(([variable, coefficient]) => ({ variable, coefficient }));
+    const expression = formatTerms(terms);
+    if (this.objectiveConstant === 0) return expression;
+    if (expression === "0") return String(this.objectiveConstant);
+    const sign = this.objectiveConstant < 0 ? "-" : "+";
+    return `${expression} ${sign} ${Math.abs(this.objectiveConstant)}`;
+  }
+
+  boundLines() {
+    const lines = [];
+    for (const [name, bounds] of this.continuousVariables) {
+      if (bounds.lower === 0 && bounds.upper === Number.POSITIVE_INFINITY) continue;
+      if (bounds.upper === Number.POSITIVE_INFINITY) {
+        lines.push(` ${bounds.lower} <= ${name}`);
+      } else {
+        lines.push(` ${bounds.lower} <= ${name} <= ${bounds.upper}`);
+      }
+    }
+    return lines;
+  }
+
+  toLpString() {
+    const bounds = this.boundLines();
+    return [
+      "Minimize",
+      ` obj: ${this.objectiveExpression()}`,
+      "Subject To",
+      ...this.constraints,
+      ...(bounds.length ? ["Bounds", ...bounds] : []),
+      "Binary",
+      ...this.binaryVariables.map((name) => ` ${name}`),
+      "End",
+    ].join("\n");
+  }
 }
 
-/**
- * H1〜H12だけを含む実行可能性判定用のCPLEX LPモデルを構築する。
- * IndexedDBには触れない純粋関数なので、フィクスチャを渡して単体検証できる。
- */
-export function buildModel(targetMonth, data = {}) {
+function skillSetting(settings, code, defaultLevel = "1") {
+  const current = settings.skills?.[code] ?? {};
+  return {
+    minimumLevel: current.minimum_level ?? defaultLevel,
+    requiredCount: Math.max(0, integer(current.required_count)),
+    priority: current.priority === "hard" ? "hard" : "soft",
+  };
+}
+
+/** Build the H1-H12 model and all Phase 8 weighted soft constraints. */
+export function buildModel(targetMonth, data = {}, { random = Math.random } = {}) {
   const days = monthDates(targetMonth);
   const employees = Array.from(data.employees ?? []).filter(
     (employee) => Boolean(employee.active),
@@ -47,15 +204,21 @@ export function buildModel(targetMonth, data = {}) {
   const requests = Array.from(data.requests ?? []);
   const settings = data.settings ?? {};
   const staffRelations = Array.from(data.staffRelations ?? []);
+  const businessDayRows = Array.from(data.businessDays ?? []);
+  const campaigns = Array.from(data.campaigns ?? []);
+  const roleRequirements = Array.from(data.roleRequirements ?? []);
   const shiftCodes = workShifts.map((shift) => String(shift.shift_code));
   const employeeIds = new Set(employees.map((employee) => String(employee.employee_id)));
+  const employeeMap = new Map(employees.map(
+    (employee) => [String(employee.employee_id), employee],
+  ));
   const validDays = new Set(days);
   const shiftCodeSet = new Set(shiftCodes);
+  const model = new LpComposer();
 
   const variables = [];
   const variableMap = {};
   const variableLookup = new Map();
-
   employees.forEach((employee, employeeIndex) => {
     days.forEach((date, dayIndex) => {
       workShifts.forEach((shift, shiftIndex) => {
@@ -68,34 +231,37 @@ export function buildModel(targetMonth, data = {}) {
         };
         variables.push(metadata);
         variableMap[name] = metadata;
-        variableLookup.set(
-          requirementKey(personDayKey(metadata.employee_id, date), metadata.shift_code),
-          name,
-        );
+        variableLookup.set(variableKey(metadata.employee_id, date, metadata.shift_code), name);
+        model.addBinaryVariable(name);
       });
     });
   });
 
   const variableFor = (employeeId, date, shiftCode) => variableLookup.get(
-    requirementKey(personDayKey(String(employeeId), date), String(shiftCode)),
+    variableKey(String(employeeId), date, String(shiftCode)),
   );
   const variablesForDay = (employeeId, date) => shiftCodes.map(
     (shiftCode) => variableFor(employeeId, date, shiftCode),
   ).filter(Boolean);
+  const variablesForEmployee = (employeeId, selectedDays = days) => selectedDays.flatMap(
+    (date) => variablesForDay(employeeId, date),
+  );
+  const variablesForShift = (employeeId, shiftCode) => days.map(
+    (date) => variableFor(employeeId, date, shiftCode),
+  ).filter(Boolean);
 
-  const constraints = [];
   const counts = Object.fromEntries(
     Array.from({ length: 12 }, (_, index) => [`H${index + 1}`, 0]),
   );
-  const addConstraint = (group, name, terms, operator, rightHandSide) => {
-    constraints.push(` ${name}: ${formatTerms(terms)} ${operator} ${rightHandSide}`);
+  const addHardConstraint = (group, name, terms, operator, rightHandSide) => {
+    model.addConstraint(name, terms, operator, rightHandSide);
     counts[group] += 1;
   };
 
-  // H1: 各職員は1日につき高々1勤務。
+  // H1: one shift per employee and day.
   employees.forEach((employee, employeeIndex) => {
     days.forEach((date, dayIndex) => {
-      addConstraint(
+      addHardConstraint(
         "H1",
         `h1_e${employeeIndex}_d${dayIndex}`,
         positiveTerms(variablesForDay(employee.employee_id, date)),
@@ -105,13 +271,12 @@ export function buildModel(targetMonth, data = {}) {
     });
   });
 
-  // H2: 夜勤不可の職員はN勤務に入れない。
-  const nightShiftIndex = shiftCodes.indexOf("N");
-  if (nightShiftIndex >= 0) {
+  // H2: employees without night permission cannot work N.
+  if (shiftCodeSet.has("N")) {
     employees.forEach((employee, employeeIndex) => {
       if (Boolean(employee.night_allowed)) return;
       days.forEach((date, dayIndex) => {
-        addConstraint(
+        addHardConstraint(
           "H2",
           `h2_e${employeeIndex}_d${dayIndex}`,
           positiveTerms([variableFor(employee.employee_id, date, "N")]),
@@ -122,79 +287,77 @@ export function buildModel(targetMonth, data = {}) {
     });
   }
 
-  // H3: 未登録の組み合わせを0人として、全日×全勤務区分を厳密一致させる。
+  // H3: exact coverage for every day and work-shift combination.
   const requirementMap = new Map();
+  const requiredByDay = new Map();
   for (const row of requirements) {
-    requirementMap.set(
-      requirementKey(String(row.date), String(row.shift_code)),
-      integer(row.required_count),
-    );
+    const count = integer(row.required_count);
+    requirementMap.set(requirementKey(String(row.date), String(row.shift_code)), count);
+    requiredByDay.set(String(row.date), (requiredByDay.get(String(row.date)) ?? 0) + count);
   }
   days.forEach((date, dayIndex) => {
     shiftCodes.forEach((shiftCode, shiftIndex) => {
-      const names = employees.map(
-        (employee) => variableFor(employee.employee_id, date, shiftCode),
-      ).filter(Boolean);
-      addConstraint(
+      addHardConstraint(
         "H3",
         `h3_d${dayIndex}_c${shiftIndex}`,
-        positiveTerms(names),
+        positiveTerms(employees.map(
+          (employee) => variableFor(employee.employee_id, date, shiftCode),
+        ).filter(Boolean)),
         "=",
         requirementMap.get(requirementKey(date, shiftCode)) ?? 0,
       );
     });
   });
 
-  // H4: 月間勤務日数の下限・上限。
+  // H4: monthly workday lower/upper bounds.
   employees.forEach((employee, employeeIndex) => {
-    const names = days.flatMap((date) => variablesForDay(employee.employee_id, date));
-    addConstraint(
+    const terms = positiveTerms(variablesForEmployee(employee.employee_id));
+    addHardConstraint(
       "H4",
       `h4_min_e${employeeIndex}`,
-      positiveTerms(names),
+      terms,
       ">=",
       integer(employee.min_work_days),
     );
-    addConstraint(
+    addHardConstraint(
       "H4",
       `h4_max_e${employeeIndex}`,
-      positiveTerms(names),
+      terms,
       "<=",
       Math.min(integer(employee.max_work_days, days.length), days.length),
     );
   });
 
-  // H5: k+1日の各窓で勤務日をk日以下にする。
+  // H5: maximum consecutive workdays.
   employees.forEach((employee, employeeIndex) => {
     const maximum = Math.max(1, integer(employee.max_consecutive_days, 1));
     for (let start = 0; start < days.length - maximum; start += 1) {
-      const names = days.slice(start, start + maximum + 1).flatMap(
-        (date) => variablesForDay(employee.employee_id, date),
-      );
-      addConstraint(
+      addHardConstraint(
         "H5",
         `h5_e${employeeIndex}_w${start}`,
-        positiveTerms(names),
+        positiveTerms(variablesForEmployee(
+          employee.employee_id,
+          days.slice(start, start + maximum + 1),
+        )),
         "<=",
         maximum,
       );
     }
   });
 
-  // H6: 翌日休養が必要な勤務の次の日は勤務させない。
+  // H6: rest on the day after a rest-requiring shift.
   const restShiftIndexes = workShifts
     .map((shift, index) => (Boolean(shift.requires_rest_next_day) ? index : -1))
     .filter((index) => index >= 0);
   employees.forEach((employee, employeeIndex) => {
     days.slice(0, -1).forEach((date, dayIndex) => {
       restShiftIndexes.forEach((shiftIndex) => {
-        const restCode = shiftCodes[shiftIndex];
         const terms = positiveTerms(variablesForDay(employee.employee_id, days[dayIndex + 1]));
         terms.push({
           coefficient: 1,
-          variable: variableFor(employee.employee_id, date, restCode),
+          variable: variableFor(employee.employee_id, date, shiftCodes[shiftIndex]),
         });
-        addConstraint(
+        addHardConstraint(
           "H6",
           `h6_e${employeeIndex}_d${dayIndex}_c${shiftIndex}`,
           terms,
@@ -205,45 +368,64 @@ export function buildModel(targetMonth, data = {}) {
     });
   });
 
-  // H7/H8: hardの休み・勤務指定。Python版同様、fixedのOも休みとして扱う。
+  // H7/H8 and soft requests.
   requests.forEach((request, requestIndex) => {
     const employeeId = String(request.employee_id);
     const date = String(request.date);
     const shiftCode = String(request.shift_code || "O");
-    if (
-      request.priority !== "hard"
-      || !employeeIds.has(employeeId)
-      || !validDays.has(date)
-    ) {
+    if (!employeeIds.has(employeeId) || !validDays.has(date)) return;
+    const dailyVariables = variablesForDay(employeeId, date);
+
+    if (request.priority === "hard") {
+      if (request.request_type === "off" || shiftCode === "O") {
+        addHardConstraint(
+          "H7",
+          `h7_r${requestIndex}`,
+          positiveTerms(dailyVariables),
+          "=",
+          0,
+        );
+      } else if (request.request_type === "fixed" && shiftCodeSet.has(shiftCode)) {
+        addHardConstraint(
+          "H8",
+          `h8_r${requestIndex}`,
+          positiveTerms([variableFor(employeeId, date, shiftCode)]),
+          "=",
+          1,
+        );
+      }
       return;
     }
-    if (request.request_type === "off" || shiftCode === "O") {
-      addConstraint(
-        "H7",
-        `h7_r${requestIndex}`,
-        positiveTerms(variablesForDay(employeeId, date)),
-        "=",
-        0,
+
+    if (request.request_type === "off") {
+      dailyVariables.forEach((variable) => model.addObjectiveTerm(
+        variable,
+        penalty("soft_request_off_violation"),
+      ));
+    } else if (request.request_type === "avoid" && shiftCodeSet.has(shiftCode)) {
+      model.addObjectiveTerm(
+        variableFor(employeeId, date, shiftCode),
+        penalty("avoid_shift_assigned"),
       );
-    } else if (request.request_type === "fixed" && shiftCodeSet.has(shiftCode)) {
-      addConstraint(
-        "H8",
-        `h8_r${requestIndex}`,
-        positiveTerms([variableFor(employeeId, date, shiftCode)]),
-        "=",
-        1,
+    } else if (
+      ["prefer", "fixed"].includes(request.request_type)
+      && shiftCodeSet.has(shiftCode)
+    ) {
+      model.addObjectiveConstant(penalty("prefer_request_not_satisfied"));
+      model.addObjectiveTerm(
+        variableFor(employeeId, date, shiftCode),
+        -penalty("prefer_request_not_satisfied"),
       );
     }
   });
 
   if (Boolean(settings.restaurant_mode)) {
-    // H9: E勤務がある日は開店担当者を1名以上配置する。
-    const earlyShiftIndex = shiftCodes.indexOf("E");
-    if (earlyShiftIndex >= 0) {
+    // H9/H10: opener/closer coverage.
+    if (shiftCodeSet.has("E")) {
       const openers = employees.filter((employee) => employeeHasRole(employee, "opener"));
       days.forEach((date, dayIndex) => {
         if ((requirementMap.get(requirementKey(date, "E")) ?? 0) < 1) return;
-        addConstraint(
+        addHardConstraint(
           "H9",
           `h9_d${dayIndex}`,
           positiveTerms(openers.map(
@@ -254,14 +436,11 @@ export function buildModel(targetMonth, data = {}) {
         );
       });
     }
-
-    // H10: L勤務がある日は閉店担当者を1名以上配置する。
-    const lateShiftIndex = shiftCodes.indexOf("L");
-    if (lateShiftIndex >= 0) {
+    if (shiftCodeSet.has("L")) {
       const closers = employees.filter((employee) => employeeHasRole(employee, "closer"));
       days.forEach((date, dayIndex) => {
         if ((requirementMap.get(requirementKey(date, "L")) ?? 0) < 1) return;
-        addConstraint(
+        addHardConstraint(
           "H10",
           `h10_d${dayIndex}`,
           positiveTerms(closers.map(
@@ -273,7 +452,7 @@ export function buildModel(targetMonth, data = {}) {
       });
     }
 
-    // H11: hardの同時配置禁止は「同じ日・同じ勤務区分」だけに適用する。
+    // H11: hard never_together applies only to the same shift code.
     staffRelations.forEach((relation, relationIndex) => {
       const employeeId1 = String(relation.employee_id_1);
       const employeeId2 = String(relation.employee_id_2);
@@ -283,12 +462,10 @@ export function buildModel(targetMonth, data = {}) {
         || relation.priority !== "hard"
         || !employeeIds.has(employeeId1)
         || !employeeIds.has(employeeId2)
-      ) {
-        return;
-      }
+      ) return;
       days.forEach((date, dayIndex) => {
         shiftCodes.forEach((shiftCode, shiftIndex) => {
-          addConstraint(
+          addHardConstraint(
             "H11",
             `h11_r${relationIndex}_d${dayIndex}_c${shiftIndex}`,
             positiveTerms([
@@ -302,54 +479,394 @@ export function buildModel(targetMonth, data = {}) {
       });
     });
 
-    // H12: 必要人数がある勤務を新人だけで構成しない。
+    // H12: a required shift cannot consist only of newcomers.
     const newcomers = employees.filter((employee) => Boolean(employee.is_new_staff));
     const experienced = employees.filter((employee) => !Boolean(employee.is_new_staff));
     if (newcomers.length) {
       days.forEach((date, dayIndex) => {
         shiftCodes.forEach((shiftCode, shiftIndex) => {
           if ((requirementMap.get(requirementKey(date, shiftCode)) ?? 0) < 1) return;
-          const terms = newcomers.map((employee) => ({
-            coefficient: 1,
-            variable: variableFor(employee.employee_id, date, shiftCode),
-          }));
-          terms.push(...experienced.map((employee) => ({
-            coefficient: -newcomers.length,
-            variable: variableFor(employee.employee_id, date, shiftCode),
-          })));
-          addConstraint(
+          addHardConstraint(
             "H12",
             `h12_d${dayIndex}_c${shiftIndex}`,
-            terms,
+            [
+              ...positiveTerms(newcomers.map(
+                (employee) => variableFor(employee.employee_id, date, shiftCode),
+              )),
+              ...experienced.map((employee) => ({
+                coefficient: -newcomers.length,
+                variable: variableFor(employee.employee_id, date, shiftCode),
+              })),
+            ],
             "<=",
             0,
           );
         });
       });
     }
+
+    const businessDays = new Map(businessDayRows.map((row) => [String(row.date), row]));
+    const openDays = days.filter(
+      (date) => (requiredByDay.get(date) ?? 0) > 0
+        && Boolean(businessDays.get(date)?.is_open ?? 1),
+    );
+    const activeCampaigns = (date) => campaigns.filter(
+      (campaign) => String(campaign.start_date) <= date && date <= String(campaign.end_date),
+    );
+
+    const english = skillSetting(settings, "english_support", "basic");
+    if (english.requiredCount > 0) {
+      const level = englishLevelRank(english.minimumLevel);
+      const qualified = employees.filter((employee) => employeeHasRole(
+        employee,
+        "english_support",
+        { skillLevel: level },
+      ));
+      const needed = Math.max(1, english.requiredCount);
+      for (const date of openDays) {
+        if (settings.require_english_per_shift) {
+          shiftCodes.forEach((shiftCode, shiftIndex) => {
+            if ((requirementMap.get(requirementKey(date, shiftCode)) ?? 0) < 1) return;
+            addMinimum(
+              model,
+              positiveTerms(qualified.map(
+                (employee) => variableFor(employee.employee_id, date, shiftCode),
+              )),
+              needed,
+              english.priority,
+              penalty("english_missing"),
+              `english_${days.indexOf(date)}_${shiftIndex}`,
+            );
+          });
+        } else {
+          addMinimum(
+            model,
+            positiveTerms(qualified.flatMap(
+              (employee) => variablesForDay(employee.employee_id, date),
+            )),
+            needed,
+            english.priority,
+            penalty("english_missing"),
+            `english_${days.indexOf(date)}`,
+          );
+        }
+      }
+    }
+
+    const allergy = skillSetting(settings, "allergy_support");
+    if (allergy.requiredCount > 0) {
+      const qualified = employees.filter(
+        (employee) => employeeHasRole(employee, "allergy_support"),
+      );
+      openDays.forEach((date, dayIndex) => addMinimum(
+        model,
+        positiveTerms(qualified.flatMap(
+          (employee) => variablesForDay(employee.employee_id, date),
+        )),
+        Math.max(1, allergy.requiredCount),
+        allergy.priority,
+        penalty("allergy_support_missing"),
+        `allergy_${dayIndex}`,
+      ));
+    }
+
+    const newProduct = skillSetting(settings, "new_product");
+    // Phase 1's merged settings schema has no require_new_product flag. An explicit
+    // flag wins; otherwise a positive required_count is the enable switch used by the UI.
+    const requireNewProduct = settings.require_new_product === undefined
+      ? newProduct.requiredCount > 0
+      : Boolean(settings.require_new_product);
+    openDays.forEach((date, dayIndex) => {
+      const todaysCampaigns = activeCampaigns(date);
+      const businessDay = businessDays.get(date) ?? {};
+      if (!todaysCampaigns.length && !Boolean(businessDay.new_product_active)) return;
+
+      const configuredLevel = integer(newProduct.minimumLevel, 1);
+      const requiredLevel = Math.max(
+        configuredLevel,
+        ...todaysCampaigns.map((campaign) => integer(campaign.required_skill_level, 2)),
+      );
+      if (requireNewProduct) {
+        const qualified = employees.filter(
+          (employee) => integer(employee.new_product_skill) >= requiredLevel,
+        );
+        addMinimum(
+          model,
+          positiveTerms(qualified.flatMap(
+            (employee) => variablesForDay(employee.employee_id, date),
+          )),
+          Math.max(1, newProduct.requiredCount),
+          newProduct.priority,
+          penalty("new_product_missing"),
+          `new_product_${dayIndex}`,
+        );
+      }
+
+      todaysCampaigns.forEach((campaign, campaignIndex) => {
+        const campaignName = safeName(campaign.id ?? campaignIndex);
+        const skillField = CATEGORY_SKILL_FIELDS[campaign.category];
+        if (skillField) {
+          const qualified = employees.filter(
+            (employee) => integer(employee[skillField]) >= integer(campaign.required_skill_level, 2),
+          );
+          addMinimum(
+            model,
+            positiveTerms(qualified.flatMap(
+              (employee) => variablesForDay(employee.employee_id, date),
+            )),
+            1,
+            "soft",
+            penalty("category_skill_missing"),
+            `category_${campaignName}_${dayIndex}`,
+          );
+        }
+        if (
+          Boolean(campaign.require_leader_first_week)
+          && date < addDays(String(campaign.start_date), 7)
+        ) {
+          const leaders = employees.filter(
+            (employee) => integer(employee.new_product_skill) >= 3,
+          );
+          addMinimum(
+            model,
+            positiveTerms(leaders.flatMap(
+              (employee) => variablesForDay(employee.employee_id, date),
+            )),
+            1,
+            "soft",
+            penalty("new_product_leader_missing"),
+            `product_leader_${campaignName}_${dayIndex}`,
+          );
+        }
+      });
+    });
+
+    for (const definition of SKILL_DEFINITIONS) {
+      if (["english_support", "new_product", "allergy_support"].includes(definition.code)) {
+        continue;
+      }
+      const setting = skillSetting(settings, definition.code);
+      if (setting.requiredCount <= 0) continue;
+      const qualified = employees.filter((employee) => employeeHasSkill(
+        employee,
+        definition.code,
+        setting.minimumLevel,
+      ));
+      openDays.forEach((date, dayIndex) => addMinimum(
+        model,
+        positiveTerms(qualified.flatMap(
+          (employee) => variablesForDay(employee.employee_id, date),
+        )),
+        setting.requiredCount,
+        setting.priority,
+        penalty("role_requirement_missing"),
+        `skill_${definition.code}_${dayIndex}`,
+      ));
+    }
+
+    roleRequirements.forEach((requirement, requirementIndex) => {
+      const date = String(requirement.date);
+      const shiftCode = String(requirement.shift_code);
+      if (!validDays.has(date) || !shiftCodeSet.has(shiftCode)) return;
+      const qualified = employees.filter(
+        (employee) => employeeHasRole(employee, requirement.role_code),
+      );
+      addMinimum(
+        model,
+        positiveTerms(qualified.map(
+          (employee) => variableFor(employee.employee_id, date, shiftCode),
+        )),
+        integer(requirement.required_count),
+        requirement.priority,
+        penalty("role_requirement_missing"),
+        `role_${safeName(requirement.id ?? requirementIndex)}`,
+      );
+    });
+
+    if (shiftCodeSet.has("L") && shiftCodeSet.has("E")) {
+      employees.forEach((employee, employeeIndex) => {
+        for (let dayIndex = 0; dayIndex < days.length - 1; dayIndex += 1) {
+          addAndVar(
+            model,
+            variableFor(employee.employee_id, days[dayIndex], "L"),
+            variableFor(employee.employee_id, days[dayIndex + 1], "E"),
+            penalty("close_to_open"),
+            `close_open_e${employeeIndex}_d${dayIndex}`,
+          );
+        }
+      });
+    }
+
+    const highDays = days.filter(
+      (date) => ["high", "very_high"].includes(businessDays.get(date)?.demand_level),
+    );
+    staffRelations.forEach((relation, relationIndex) => {
+      if (!Boolean(relation.active)) return;
+      const employeeId1 = String(relation.employee_id_1);
+      const employeeId2 = String(relation.employee_id_2);
+      if (!employeeMap.has(employeeId1) || !employeeMap.has(employeeId2)) return;
+      const weight = Math.max(0, integer(relation.weight));
+      const relationName = `relation_${safeName(relation.id ?? relationIndex)}`;
+      if (["prefer_together", "mentor_pair", "prefer_peak_pair"].includes(
+        relation.relation_type,
+      )) {
+        const selectedDays = relation.relation_type === "prefer_peak_pair" ? highDays : days;
+        if (selectedDays.length) {
+          addAbsDiff(
+            model,
+            positiveTerms(variablesForEmployee(employeeId1, selectedDays)),
+            positiveTerms(variablesForEmployee(employeeId2, selectedDays)),
+            weight,
+            relationName,
+          );
+        }
+        return;
+      }
+      if (
+        relation.relation_type === "never_together"
+        && relation.priority === "hard"
+      ) return;
+      if (![
+        "avoid_together",
+        "never_together",
+        "avoid_closing_pair",
+      ].includes(relation.relation_type)) return;
+      const codes = relation.relation_type === "avoid_closing_pair"
+        ? (shiftCodeSet.has("L") ? ["L"] : [])
+        : shiftCodes;
+      days.forEach((date, dayIndex) => {
+        codes.forEach((shiftCode, shiftIndex) => addAndVar(
+          model,
+          variableFor(employeeId1, date, shiftCode),
+          variableFor(employeeId2, date, shiftCode),
+          weight,
+          `${relationName}_d${dayIndex}_c${shiftIndex}`,
+        ));
+      });
+    });
   }
 
-  const lines = [
-    "Minimize",
-    ` obj: ${variables.length ? variables.map(({ name }) => `0 ${name}`).join(" + ") : "0"}`,
-    "Subject To",
-    ...constraints,
-    "Binary",
-    ...variables.map(({ name }) => ` ${name}`),
-    "End",
-  ];
+  // Fair distribution of workdays, nights, weekends and each shift code.
+  const workGroups = employees.map(
+    (employee) => positiveTerms(variablesForEmployee(employee.employee_id)),
+  );
+  const totalRequiredWork = [...requirementMap.values()].reduce(
+    (sum, count) => sum + Math.max(0, count),
+    0,
+  );
+  addTargetDeviation(
+    model,
+    workGroups,
+    totalRequiredWork,
+    penalty("workday_target_deviation"),
+    "work_target",
+    days.length,
+  );
+  addSpread(model, workGroups, penalty("workday_imbalance"), "work");
 
+  if (shiftCodeSet.has("N")) {
+    const nightGroups = employees.filter(
+      (employee) => Boolean(employee.night_allowed),
+    ).map((employee) => positiveTerms(variablesForShift(employee.employee_id, "N")));
+    addSpread(model, nightGroups, penalty("night_shift_imbalance"), "night");
+  }
+  const weekendDays = days.filter(isWeekend);
+  const weekendGroups = employees.map((employee) => positiveTerms(
+    variablesForEmployee(employee.employee_id, weekendDays),
+  ));
+  addSpread(model, weekendGroups, penalty("weekend_shift_imbalance"), "weekend");
+
+  const english = skillSetting(settings, "english_support", "basic");
+  const balanceCandidatesForShift = (shiftCode) => {
+    const maximumRequired = Math.max(
+      ...days.map((date) => requirementMap.get(requirementKey(date, shiftCode)) ?? 0),
+    );
+    const candidates = employees.filter((employee) => {
+      if (shiftCode === "N" && !Boolean(employee.night_allowed)) return false;
+      if (settings.restaurant_mode) {
+        if (shiftCode === "E" && !employeeHasRole(employee, "opener")) return false;
+        if (shiftCode === "L" && !employeeHasRole(employee, "closer")) return false;
+        if (Boolean(employee.is_new_staff) && maximumRequired <= 1) return false;
+        if (
+          english.requiredCount > 0
+          && english.priority === "hard"
+          && settings.require_english_per_shift
+          && maximumRequired <= Math.max(1, english.requiredCount)
+          && !employeeHasRole(employee, "english_support", {
+            skillLevel: englishLevelRank(english.minimumLevel),
+          })
+        ) return false;
+      }
+      return true;
+    });
+    return candidates.length ? candidates : employees;
+  };
+
+  shiftCodes.forEach((shiftCode, shiftIndex) => {
+    const total = days.reduce(
+      (sum, date) => sum + Math.max(
+        0,
+        requirementMap.get(requirementKey(date, shiftCode)) ?? 0,
+      ),
+      0,
+    );
+    if (total <= 0) return;
+    const groups = balanceCandidatesForShift(shiftCode).map(
+      (employee) => positiveTerms(variablesForShift(employee.employee_id, shiftCode)),
+    );
+    addTargetDeviation(
+      model,
+      groups,
+      total,
+      penalty("shift_type_target_deviation"),
+      `shift_target_${shiftIndex}`,
+      days.length,
+    );
+    addSpread(
+      model,
+      groups,
+      penalty("shift_type_imbalance"),
+      `shift_${shiftIndex}`,
+    );
+  });
+
+  employees.forEach((employee, employeeIndex) => {
+    for (let dayIndex = 0; dayIndex < days.length - 1; dayIndex += 1) {
+      shiftCodes.forEach((shiftCode, shiftIndex) => addAndVar(
+        model,
+        variableFor(employee.employee_id, days[dayIndex], shiftCode),
+        variableFor(employee.employee_id, days[dayIndex + 1], shiftCode),
+        penalty("same_shift_streak"),
+        `same_shift_e${employeeIndex}_d${dayIndex}_c${shiftIndex}`,
+      ));
+    }
+  });
+
+  const randomWeight = penalty("random_assignment_tiebreaker");
+  variables.forEach(({ name }) => model.addObjectiveTerm(
+    name,
+    Math.floor(random() * (randomWeight + 1)),
+  ));
+
+  const lpString = model.toLpString();
   return {
     targetMonth,
-    lpString: lines.join("\n"),
+    lpString,
     variables,
     variableMap,
+    binaryVariables: [...model.binaryVariables],
     days,
     shiftCodes,
     employeeIds: employees.map((employee) => String(employee.employee_id)),
     stats: {
       variableCount: variables.length,
-      constraintCount: constraints.length,
+      assignmentVariableCount: variables.length,
+      binaryVariableCount: model.binaryVariables.length,
+      continuousVariableCount: model.continuousVariables.size,
+      totalVariableCount: model.binaryVariables.length + model.continuousVariables.size,
+      constraintCount: model.constraints.length,
+      softConstraintCount: model.softConstraintCount,
+      objectiveTermCount: model.objective.size,
       constraintsByGroup: counts,
     },
   };
