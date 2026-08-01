@@ -21,6 +21,7 @@ import {
 const REQUEST_TYPES = new Set(["off", "avoid", "prefer", "fixed"]);
 const PRIORITIES = new Set(["hard", "soft"]);
 const KEY_SEPARATOR = "\u0000";
+const MAX_SUBSET_ELIGIBILITY_ISSUES = 10;
 
 function personDayKey(employeeId, date) {
   return `${employeeId}${KEY_SEPARATOR}${date}`;
@@ -183,6 +184,14 @@ export async function precheck(targetMonth) {
       hardFixed.set(personDayKey(request.employee_id, request.date), request.shift_code);
     }
   }
+  const isEligible = (employee, shiftCode, day) => {
+    const key = personDayKey(employee.employee_id, day);
+    if (hardOff.has(key)) return false;
+    if (hardAvoidedByPersonDay.get(key)?.has(shiftCode)) return false;
+    if (shiftCode === "N" && !employee.night_allowed) return false;
+    const fixed = hardFixed.get(key);
+    return !fixed || fixed === shiftCode;
+  };
   const requirementsByDate = new Map();
   for (const requirement of requirements) {
     if (!Number(requirement.required_count)) continue;
@@ -190,6 +199,8 @@ export async function precheck(targetMonth) {
     requirementsByDate.get(requirement.date).push(requirement);
   }
 
+  let subsetEligibilityIssueCount = 0;
+  let omittedSubsetEligibilityIssueCount = 0;
   for (const [day, rows] of requirementsByDate) {
     const total = rows.reduce((sum, row) => sum + Number(row.required_count), 0);
     if (total > active.length) {
@@ -199,15 +210,30 @@ export async function precheck(targetMonth) {
         `${day} は合計 ${total} 人必要ですが、勤務対象者は ${active.length} 人です。／この日の必要人数を減らすか、勤務対象の職員を増やしてください。`,
       );
     }
+    const demandByCode = new Map();
     for (const requirement of rows) {
-      const eligible = active.filter((employee) => {
-        const key = personDayKey(employee.employee_id, day);
-        if (hardOff.has(key)) return false;
-        if (requirement.shift_code === "N" && !employee.night_allowed) return false;
-        const fixed = hardFixed.get(key);
-        return !fixed || fixed === requirement.shift_code;
-      });
+      if (
+        Number(requirement.required_count) <= 0
+        || !workShiftCodes.has(requirement.shift_code)
+      ) continue;
+      demandByCode.set(
+        requirement.shift_code,
+        (demandByCode.get(requirement.shift_code) || 0) + Number(requirement.required_count),
+      );
+    }
+    const workCodes = [...demandByCode.keys()];
+    const eligibleByCode = new Map();
+    const singleShiftShortfalls = new Set();
+    for (const requirement of rows) {
+      const eligible = active.filter((employee) => (
+        isEligible(employee, requirement.shift_code, day)
+      ));
+      eligibleByCode.set(
+        requirement.shift_code,
+        new Set(eligible.map((employee) => employee.employee_id)),
+      );
       if (Number(requirement.required_count) > eligible.length) {
+        singleShiftShortfalls.add(requirement.shift_code);
         addIssue(
           issues,
           "error",
@@ -215,6 +241,51 @@ export async function precheck(targetMonth) {
         );
       }
     }
+    if (workCodes.length > 20) continue;
+
+    const explainingMasks = workCodes
+      .map((code, index) => (singleShiftShortfalls.has(code) ? 1 << index : 0))
+      .filter(Boolean);
+    const subsetLimit = 1 << workCodes.length;
+    for (let subsetSize = 2; subsetSize <= workCodes.length; subsetSize += 1) {
+      for (let subsetMask = 1; subsetMask < subsetLimit; subsetMask += 1) {
+        let bitCount = 0;
+        for (let remaining = subsetMask; remaining; remaining &= remaining - 1) bitCount += 1;
+        if (bitCount !== subsetSize) continue;
+        if (explainingMasks.some((mask) => (subsetMask & mask) === mask)) continue;
+
+        let demand = 0;
+        const pool = new Set();
+        const codes = [];
+        for (let index = 0; index < workCodes.length; index += 1) {
+          if (!(subsetMask & (1 << index))) continue;
+          const code = workCodes[index];
+          codes.push(code);
+          demand += demandByCode.get(code);
+          for (const employeeId of eligibleByCode.get(code)) pool.add(employeeId);
+        }
+        if (pool.size >= demand) continue;
+
+        explainingMasks.push(subsetMask);
+        if (subsetEligibilityIssueCount < MAX_SUBSET_ELIGIBILITY_ISSUES) {
+          addIssue(
+            issues,
+            "error",
+            `${day} は ${codes.join("・")} の合計必要人数 ${demand} 人に対し、これらの勤務に割当可能な職員は ${pool.size} 人しかいません。／必要人数を減らすか、対応可能な職員を増やす、または該当日の hard 希望・夜勤可否を見直してください。`,
+          );
+          subsetEligibilityIssueCount += 1;
+        } else {
+          omittedSubsetEligibilityIssueCount += 1;
+        }
+      }
+    }
+  }
+  if (omittedSubsetEligibilityIssueCount) {
+    addIssue(
+      issues,
+      "error",
+      `必要人数の組み合わせに対する割当可能候補の不足がほかに ${omittedSubsetEligibilityIssueCount} 件あります（表示上限 ${MAX_SUBSET_ELIGIBILITY_ISSUES} 件）。／表示された日付から順に必要人数や hard 希望・夜勤可否を見直してください。`,
+    );
   }
 
   const totalRequired = requirements.reduce(
