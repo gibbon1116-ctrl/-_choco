@@ -204,21 +204,6 @@ export async function diagnoseInfeasibility(targetMonth) {
     }
   }
 
-  const totalRequired = [...requirementMap.values()].reduce(
-    (sum, count) => sum + Math.max(0, count),
-    0,
-  );
-  const totalMinimum = active.reduce(
-    (sum, employee) => sum + Math.max(0, Number(employee.min_work_days ?? 0)),
-    0,
-  );
-  if (totalMinimum > totalRequired) {
-    add(
-      `職員の最低勤務日数合計 ${totalMinimum} 日に対して、必要勤務数は ${totalRequired} 日です。`,
-      { condition: "全職員の最低勤務日数と必要人数" },
-    );
-  }
-
   if (settings.restaurant_mode) {
     const [businessDayRows, roleRequirements] = await Promise.all([
       getBusinessDays(targetMonth),

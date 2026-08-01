@@ -287,7 +287,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
     });
   }
 
-  // H3: exact coverage for every day and work-shift combination.
+  // H3: minimum coverage for every day and work-shift combination.
   const requirementMap = new Map();
   const requiredByDay = new Map();
   for (const row of requirements) {
@@ -303,7 +303,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
         positiveTerms(employees.map(
           (employee) => variableFor(employee.employee_id, date, shiftCode),
         ).filter(Boolean)),
-        "=",
+        ">=",
         requirementMap.get(requirementKey(date, shiftCode)) ?? 0,
       );
     });
