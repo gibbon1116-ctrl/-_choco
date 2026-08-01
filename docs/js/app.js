@@ -5,6 +5,8 @@ import * as routerApi from "./router.js";
 import * as monthSelectorApi from "./components/monthSelector.js";
 import { renderEmployeesPage } from "./pages/employees.js";
 import { renderShiftTypesPage } from "./pages/shiftTypes.js";
+import { renderRequirementsPage } from "./pages/requirements.js";
+import { renderRequestsPage } from "./pages/requests.js";
 
 async function requestPersistentStorage() {
   if (!globalThis.navigator?.storage?.persist) {
@@ -130,6 +132,14 @@ async function renderRoute(route, shell) {
     await renderShiftTypesPage(content);
     return;
   }
+  if (route.id === "requirements") {
+    await renderRequirementsPage(content);
+    return;
+  }
+  if (route.id === "requests") {
+    await renderRequestsPage(content);
+    return;
+  }
 
   const section = element("section", "placeholder-page");
   const heading = element("h1", "page-heading", route.label);
@@ -164,8 +174,18 @@ function mountApplication() {
   monthSelectorApi.initializeTargetMonth();
   const shell = createApplicationShell();
   app.replaceChildren(shell);
+  let currentRoute = routerApi.ROUTES[0];
   routerApi.startRouter((route) => {
+    currentRoute = route;
     void renderRoute(route, shell);
+  });
+  stateApi.subscribe((next, previous) => {
+    if (
+      next.targetMonth !== previous.targetMonth
+      && ["requirements", "requests"].includes(currentRoute.id)
+    ) {
+      void renderRoute(currentRoute, shell);
+    }
   });
 }
 
@@ -175,7 +195,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 2 を初期化しました。");
+    console.info("勤務表メーカー Phase 4 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }

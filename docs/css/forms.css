@@ -457,6 +457,123 @@
   border-bottom: 0;
 }
 
+/* Phase 4: requirements and requests */
+.requirements-template,
+.requirements-editor,
+.request-form-grid {
+  margin-top: 1rem;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+}
+
+.template-shift {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.template-shift__title {
+  grid-column: 1 / -1;
+  padding: 0 0.25rem;
+  color: var(--color-navy);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.requirements-table-wrap {
+  max-height: min(62vh, 720px);
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.requirements-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  min-width: 108px;
+  text-align: center;
+}
+
+.requirements-table th:first-child,
+.requirements-table th:nth-child(2) {
+  min-width: auto;
+}
+
+.requirements-table__date,
+.requirements-table__weekday {
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.requirements-table__weekday {
+  font-weight: 700;
+}
+
+.requirements-table__value {
+  padding: 0.35rem !important;
+  text-align: center !important;
+}
+
+.requirements-count-input {
+  width: 70px;
+  min-height: 2.15rem;
+  margin: auto;
+  padding: 0.3rem 0.4rem;
+  text-align: center;
+}
+
+.requirements-table tr.is-saturday td {
+  background: var(--color-saturday-bg);
+}
+
+.requirements-table tr.is-saturday .requirements-table__weekday {
+  color: var(--color-saturday);
+}
+
+.requirements-table tr.is-sunday td {
+  background: var(--color-sunday-bg);
+}
+
+.requirements-table tr.is-sunday .requirements-table__weekday {
+  color: var(--color-sunday);
+}
+
+.request-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.request-form-grid .crud-form {
+  margin-top: 0;
+}
+
+.request-form .form-grid {
+  padding: 1rem 1.1rem;
+}
+
+.request-table td {
+  vertical-align: middle;
+}
+
+.request-table td:nth-child(6) {
+  min-width: 150px;
+  white-space: normal;
+}
+
 @media (max-width: 768px) {
   .month-selector__label {
     display: none;
@@ -499,6 +616,16 @@
   .crud-form__header,
   .form-section,
   .form-actions {
+    padding-right: 0.85rem;
+    padding-left: 0.85rem;
+  }
+
+  .request-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .template-grid,
+  .request-form .form-grid {
     padding-right: 0.85rem;
     padding-left: 0.85rem;
   }
