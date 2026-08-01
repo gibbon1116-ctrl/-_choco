@@ -380,7 +380,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
       if (
         request.request_type === "off"
         || (
-          ["fixed", "prefer"].includes(request.request_type)
+          request.request_type === "fixed"
           && shiftCode === "O"
         )
       ) {
@@ -392,7 +392,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           0,
         );
       } else if (
-        ["fixed", "prefer"].includes(request.request_type)
+        request.request_type === "fixed"
         && shiftCodeSet.has(shiftCode)
       ) {
         addHardConstraint(
@@ -402,6 +402,17 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           "=",
           1,
         );
+      } else if (request.request_type === "prefer" && shiftCodeSet.has(shiftCode)) {
+        for (const otherCode of shiftCodes) {
+          if (otherCode === shiftCode) continue;
+          addHardConstraint(
+            "H8",
+            `h8_r${requestIndex}_${otherCode}`,
+            positiveTerms([variableFor(employeeId, date, otherCode)]),
+            "=",
+            0,
+          );
+        }
       } else if (request.request_type === "avoid" && shiftCodeSet.has(shiftCode)) {
         addHardConstraint(
           "H8",

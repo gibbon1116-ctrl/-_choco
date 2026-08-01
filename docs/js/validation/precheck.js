@@ -63,6 +63,9 @@ export async function precheck(targetMonth) {
   ]);
   const active = employees.filter((employee) => Boolean(employee.active));
   const shiftCodes = new Set(shifts.map((shift) => shift.shift_code));
+  const workShiftCodes = new Set(
+    shifts.filter((shift) => Boolean(shift.is_work)).map((shift) => shift.shift_code),
+  );
   const employeeIds = new Set(employees.map((employee) => employee.employee_id));
 
   if (!active.length) {
@@ -104,15 +107,25 @@ export async function precheck(targetMonth) {
 
   const hardByPersonDay = new Map();
   const hardAvoidedByPersonDay = new Map();
+  const hardFixedByPersonDay = new Map();
+  const hardPreferredByPersonDay = new Map();
   for (const request of requests) {
     if (request.priority !== "hard") continue;
     const key = personDayKey(request.employee_id, request.date);
     const requested = request.request_type === "off"
       ? "O"
       : (request.shift_code || "O");
-    if (["off", "fixed", "prefer"].includes(request.request_type)) {
+    if (["off", "fixed"].includes(request.request_type)) {
       if (!hardByPersonDay.has(key)) hardByPersonDay.set(key, new Set());
       hardByPersonDay.get(key).add(requested);
+    }
+    if (request.request_type === "fixed" && workShiftCodes.has(requested)) {
+      if (!hardFixedByPersonDay.has(key)) hardFixedByPersonDay.set(key, new Set());
+      hardFixedByPersonDay.get(key).add(requested);
+    }
+    if (request.request_type === "prefer" && workShiftCodes.has(requested)) {
+      if (!hardPreferredByPersonDay.has(key)) hardPreferredByPersonDay.set(key, new Set());
+      hardPreferredByPersonDay.get(key).add(requested);
     }
     if (request.request_type === "avoid") {
       if (!hardAvoidedByPersonDay.has(key)) hardAvoidedByPersonDay.set(key, new Set());
@@ -127,6 +140,21 @@ export async function precheck(targetMonth) {
       "error",
       `${employeeId} の ${day} に矛盾する hard 希望（${[...codes].sort().join(", ")}）があります。／同じ職員・同じ日の hard 希望のどちらかを削除するか、優先度を「できる限り」に変更してください。`,
     );
+  }
+  for (const [key, fixedCodes] of hardFixedByPersonDay) {
+    const preferredCodes = hardPreferredByPersonDay.get(key);
+    if (!preferredCodes) continue;
+    const [employeeId, day] = key.split(KEY_SEPARATOR);
+    for (const fixedCode of [...fixedCodes].sort()) {
+      for (const preferredCode of [...preferredCodes].sort()) {
+        if (fixedCode === preferredCode) continue;
+        addIssue(
+          issues,
+          "error",
+          `${employeeId} の ${day} は hard の勤務指定 ${fixedCode} と希望勤務 ${preferredCode} が矛盾しています。／競合する hard 希望のどちらかを削除するか、優先度を「できる限り」に変更してください。`,
+        );
+      }
+    }
   }
   for (const [key, pinnedCodes] of hardByPersonDay) {
     const avoidedCodes = hardAvoidedByPersonDay.get(key);
@@ -381,7 +409,7 @@ export async function precheck(targetMonth) {
     for (const request of requests) {
       if (
         request.priority === "hard"
-        && ["fixed", "prefer"].includes(request.request_type)
+        && request.request_type === "fixed"
       ) {
         fixedLookup.set(personDayKey(request.employee_id, request.date), request.shift_code);
       }

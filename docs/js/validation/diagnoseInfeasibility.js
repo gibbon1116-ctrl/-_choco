@@ -112,7 +112,7 @@ export async function diagnoseInfeasibility(targetMonth) {
   for (const request of requests) {
     if (
       request.priority === "hard"
-      && ["fixed", "prefer"].includes(request.request_type)
+      && request.request_type === "fixed"
     ) {
       hardFixed.set(personDayKey(request.employee_id, request.date), request.shift_code);
     }
