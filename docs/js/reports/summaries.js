@@ -72,7 +72,8 @@ export async function requestViolations(
     const violated = (
       (request.request_type === "off" && actual !== "O")
       || (request.request_type === "avoid" && actual === expected)
-      || (["prefer", "fixed"].includes(request.request_type) && actual !== expected)
+      || (request.request_type === "fixed" && actual !== expected)
+      || (request.request_type === "prefer" && actual !== "O" && actual !== expected)
     );
     if (!violated) continue;
     violations.push({
