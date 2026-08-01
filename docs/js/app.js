@@ -3,6 +3,8 @@ import * as calendarApi from "./utils/calendar.js";
 import * as stateApi from "./state.js";
 import * as routerApi from "./router.js";
 import * as monthSelectorApi from "./components/monthSelector.js";
+import { renderEmployeesPage } from "./pages/employees.js";
+import { renderShiftTypesPage } from "./pages/shiftTypes.js";
 
 async function requestPersistentStorage() {
   if (!globalThis.navigator?.storage?.persist) {
@@ -103,10 +105,11 @@ function createApplicationShell() {
   return shell;
 }
 
-function renderPlaceholder(route, shell) {
+async function renderRoute(route, shell) {
   const content = shell.querySelector("#page-content");
   const headerTitle = shell.querySelector(".app-header__page");
   headerTitle.textContent = route.label;
+  content.dataset.page = route.id;
 
   for (const link of shell.querySelectorAll(".sidebar-nav__link")) {
     const isActive = link.dataset.route === route.id;
@@ -116,6 +119,16 @@ function renderPlaceholder(route, shell) {
     } else {
       link.removeAttribute("aria-current");
     }
+  }
+
+  document.title = `${route.label} | 勤務表メーカー`;
+  if (route.id === "employees") {
+    await renderEmployeesPage(content);
+    return;
+  }
+  if (route.id === "shifts") {
+    await renderShiftTypesPage(content);
+    return;
   }
 
   const section = element("section", "placeholder-page");
@@ -140,7 +153,6 @@ function renderPlaceholder(route, shell) {
   );
   section.append(card);
   content.replaceChildren(section);
-  document.title = `${route.label} | 勤務表メーカー`;
 }
 
 function mountApplication() {
@@ -152,7 +164,9 @@ function mountApplication() {
   monthSelectorApi.initializeTargetMonth();
   const shell = createApplicationShell();
   app.replaceChildren(shell);
-  routerApi.startRouter((route) => renderPlaceholder(route, shell));
+  routerApi.startRouter((route) => {
+    void renderRoute(route, shell);
+  });
 }
 
 async function initializeDataLayer() {
