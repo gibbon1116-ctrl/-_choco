@@ -19,6 +19,7 @@ import {
 import { precheck } from "./precheck.js";
 
 const KEY_SEPARATOR = "\u0000";
+export const GENERIC_INFEASIBILITY_CONDITION = "複数条件の組み合わせ";
 
 function personDayKey(employeeId, date) {
   return `${employeeId}${KEY_SEPARATOR}${date}`;
@@ -287,7 +288,7 @@ export async function diagnoseInfeasibility(targetMonth) {
   if (!diagnostics.length) {
     add(
       "日付ごとの必要人数、hard希望、勤務日数、役割条件などの組み合わせが解なしになっています。条件を1つずつ緩和して再作成してください。",
-      { condition: "複数条件の組み合わせ" },
+      { condition: GENERIC_INFEASIBILITY_CONDITION },
     );
   }
   return diagnostics;

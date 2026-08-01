@@ -98,7 +98,7 @@ function formatTerms(inputTerms) {
 }
 
 class LpComposer {
-  constructor() {
+  constructor(feasibilityOnly = false) {
     this.constraints = [];
     this.names = new Set();
     this.binaryVariables = [];
@@ -107,6 +107,7 @@ class LpComposer {
     this.objective = new Map();
     this.objectiveConstant = 0;
     this.softConstraintCount = 0;
+    this.feasibilityOnly = feasibilityOnly;
   }
 
   uniqueName(name) {
@@ -154,12 +155,14 @@ class LpComposer {
   }
 
   addObjectiveTerm(variable, coefficient) {
+    if (this.feasibilityOnly) return;
     const value = Number(coefficient);
     if (!Number.isFinite(value) || value === 0) return;
     this.objective.set(variable, (this.objective.get(variable) ?? 0) + value);
   }
 
   addObjectiveConstant(value) {
+    if (this.feasibilityOnly) return;
     const number = Number(value);
     if (Number.isFinite(number)) this.objectiveConstant += number;
   }
@@ -213,7 +216,12 @@ function skillSetting(settings, code, defaultLevel = "1") {
 }
 
 /** Build the H1-H12 model and all Phase 8 weighted soft constraints. */
-export function buildModel(targetMonth, data = {}, { random = Math.random } = {}) {
+export function buildModel(targetMonth, data = {}, {
+  random = Math.random,
+  relaxGroups = [],
+  feasibilityOnly = false,
+} = {}) {
+  const relaxSet = new Set(relaxGroups ?? []);
   const days = monthDates(targetMonth);
   const employees = Array.from(data.employees ?? []).filter(
     (employee) => Boolean(employee.active),
@@ -235,7 +243,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
   ));
   const validDays = new Set(days);
   const shiftCodeSet = new Set(shiftCodes);
-  const model = new LpComposer();
+  const model = new LpComposer(feasibilityOnly);
 
   const variables = [];
   const variableMap = {};
@@ -275,9 +283,13 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
     Array.from({ length: 12 }, (_, index) => [`H${index + 1}`, 0]),
   );
   const addHardConstraint = (group, name, terms, operator, rightHandSide) => {
+    if (group !== "H1" && relaxSet.has(group)) return;
     model.addConstraint(name, terms, operator, rightHandSide);
     counts[group] += 1;
   };
+  const effectivePriority = (priority, group) => (
+    relaxSet.has(group) ? "soft" : priority
+  );
 
   // H1: one shift per employee and day.
   employees.forEach((employee, employeeIndex) => {
@@ -582,7 +594,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
                 (employee) => variableFor(employee.employee_id, date, shiftCode),
               )),
               needed,
-              english.priority,
+              effectivePriority(english.priority, "SKILL"),
               penalty("english_missing"),
               `english_${days.indexOf(date)}_${shiftIndex}`,
             );
@@ -594,7 +606,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
               (employee) => variablesForDay(employee.employee_id, date),
             )),
             needed,
-            english.priority,
+            effectivePriority(english.priority, "SKILL"),
             penalty("english_missing"),
             `english_${days.indexOf(date)}`,
           );
@@ -613,7 +625,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           (employee) => variablesForDay(employee.employee_id, date),
         )),
         Math.max(1, allergy.requiredCount),
-        allergy.priority,
+        effectivePriority(allergy.priority, "SKILL"),
         penalty("allergy_support_missing"),
         `allergy_${dayIndex}`,
       ));
@@ -645,7 +657,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
             (employee) => variablesForDay(employee.employee_id, date),
           )),
           Math.max(1, newProduct.requiredCount),
-          newProduct.priority,
+          effectivePriority(newProduct.priority, "SKILL"),
           penalty("new_product_missing"),
           `new_product_${dayIndex}`,
         );
@@ -707,7 +719,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           (employee) => variablesForDay(employee.employee_id, date),
         )),
         setting.requiredCount,
-        setting.priority,
+        effectivePriority(setting.priority, "SKILL"),
         penalty("role_requirement_missing"),
         `skill_${definition.code}_${dayIndex}`,
       ));
@@ -726,7 +738,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
           (employee) => variableFor(employee.employee_id, date, shiftCode),
         )),
         integer(requirement.required_count),
-        requirement.priority,
+        effectivePriority(requirement.priority, "ROLE"),
         penalty("role_requirement_missing"),
         `role_${safeName(requirement.id ?? requirementIndex)}`,
       );

@@ -8,6 +8,8 @@ import { createScheduleTable, createShiftLegend } from "../components/scheduleTa
 import { monthLabel } from "../components/monthSelector.js";
 import { getState } from "../state.js";
 import { runSolver } from "../solver/runSolver.js";
+import { diagnoseConstraintGroups } from "../validation/diagnoseConstraintGroups.js";
+import { GENERIC_INFEASIBILITY_CONDITION } from "../validation/diagnoseInfeasibility.js";
 import { blockingIssues, precheck } from "../validation/precheck.js";
 import {
   employeeSummary,
@@ -329,30 +331,77 @@ export async function renderDashboardPage(container, notice = "") {
     createButtonNode.addEventListener("click", async () => {
       createButtonNode.disabled = true;
       createButtonNode.replaceChildren(element("span", "solver-spinner"), document.createTextNode(" 自動作成中…"));
-      messages.replaceChildren(createAlert("事前チェックを実行しています。", "success"));
-      const issues = await precheck(targetMonth);
-      const blockers = blockingIssues(issues);
-      if (blockers.length) {
+      try {
+        messages.replaceChildren(createAlert("事前チェックを実行しています。", "success"));
+        const issues = await precheck(targetMonth);
+        if (container._dashboardRenderToken !== renderToken) return;
+        const blockers = blockingIssues(issues);
+        if (blockers.length) {
+          appendIssueBanners(messages, issues);
+          return;
+        }
+        messages.replaceChildren(createAlert("HiGHSで勤務表を作成しています。しばらくお待ちください。", "success"));
+        const result = await runSolver(targetMonth);
+        if (container._dashboardRenderToken !== renderToken) return;
+        if (result.status === "success") {
+          await renderDashboardPage(container, `勤務表を作成しました（目的関数: ${result.objectiveValue ?? 0}）。`);
+          return;
+        }
+        if (result.status === "infeasible") {
+          const diagnostics = result.diagnostics ?? [];
+          messages.replaceChildren(createAlert(
+            ["条件を満たす勤務表が見つかりませんでした。", ...diagnostics.map((row) => row.message)],
+            "error",
+          ));
+          const onlyGenericDiagnostics = diagnostics.every(
+            (row) => row.condition === GENERIC_INFEASIBILITY_CONDITION,
+          );
+          if (!onlyGenericDiagnostics) return;
+
+          const diagnosisStatus = createAlert(
+            "原因となる条件の組み合わせを調べています。しばらく時間がかかります。",
+            "success",
+          );
+          messages.append(diagnosisStatus);
+          try {
+            const diagnosis = await diagnoseConstraintGroups(targetMonth, {
+              onProgress: ({ index, total }) => {
+                if (container._dashboardRenderToken !== renderToken) return;
+                diagnosisStatus.textContent = `原因となる条件の組み合わせを調べています（${index + 1}/${total}）。しばらく時間がかかります。`;
+              },
+            });
+            if (container._dashboardRenderToken !== renderToken) return;
+
+            let findings;
+            if (diagnosis.status === "ok" && diagnosis.groups.length) {
+              findings = [
+                "次の条件は同時に満たせません。いずれか1つを緩和すると勤務表を作成できます。",
+                ...diagnosis.groups.map((group) => `${group.label}：${group.hint}`),
+              ];
+              if (diagnosis.truncated) {
+                findings.push("診断は制限時間内に確認できた範囲の結果です。");
+              }
+            } else if (diagnosis.status === "not_reproduced") {
+              findings = "原因を自動で絞り込めませんでした（実行可能性だけの再確認では解なしを再現できませんでした）。";
+            } else {
+              findings = "原因を自動で絞り込めませんでした。条件を1つずつ見直してください。";
+            }
+            diagnosisStatus.replaceWith(createAlert(findings, "error"));
+          } catch (error) {
+            if (container._dashboardRenderToken !== renderToken) return;
+            const message = error instanceof Error ? error.message : String(error);
+            diagnosisStatus.replaceWith(createAlert(`条件の組み合わせを診断できませんでした: ${message}`, "error"));
+          }
+        } else {
+          messages.replaceChildren(createAlert(result.message ?? "自動作成に失敗しました。", "error"));
+        }
+      } catch (error) {
+        if (container._dashboardRenderToken !== renderToken) return;
+        const message = error instanceof Error ? error.message : String(error);
+        messages.replaceChildren(createAlert(`自動作成に失敗しました: ${message}`, "error"));
+      } finally {
         createButtonNode.disabled = false;
         createButtonNode.textContent = "自動作成";
-        appendIssueBanners(messages, issues);
-        return;
-      }
-      messages.replaceChildren(createAlert("HiGHSで勤務表を作成しています。しばらくお待ちください。", "success"));
-      const result = await runSolver(targetMonth);
-      if (result.status === "success") {
-        await renderDashboardPage(container, `勤務表を作成しました（目的関数: ${result.objectiveValue ?? 0}）。`);
-        return;
-      }
-      createButtonNode.disabled = false;
-      createButtonNode.textContent = "自動作成";
-      if (result.status === "infeasible") {
-        messages.replaceChildren(createAlert(
-          ["条件を満たす勤務表が見つかりませんでした。", ...(result.diagnostics ?? []).map((row) => row.message)],
-          "error",
-        ));
-      } else {
-        messages.replaceChildren(createAlert(result.message ?? "自動作成に失敗しました。", "error"));
       }
     });
 
