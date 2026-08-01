@@ -35,6 +35,26 @@ function integer(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export function buildStaffRelationWeightLookup(staffRelations, dayCount) {
+  const tierCounts = new Map();
+  Array.from(staffRelations ?? []).forEach((relation) => {
+    if (!Boolean(relation.active) || relation.priority === "hard") return;
+    const rawWeight = Math.max(0, integer(relation.weight));
+    tierCounts.set(rawWeight, (tierCounts.get(rawWeight) ?? 0) + 1);
+  });
+
+  const effectiveWeights = new Map();
+  const tiersAscending = [...tierCounts.keys()].sort((left, right) => left - right);
+  const days = Math.max(0, integer(dayCount));
+  let lowerTierMaximum = 0;
+  tiersAscending.forEach((rawWeight, tierIndex) => {
+    const effectiveWeight = tierIndex === 0 ? rawWeight : lowerTierMaximum + 1;
+    effectiveWeights.set(rawWeight, effectiveWeight);
+    lowerTierMaximum += effectiveWeight * tierCounts.get(rawWeight) * days;
+  });
+  return effectiveWeights;
+}
+
 function addDays(value, offset) {
   const date = parseIsoDate(value);
   date.setDate(date.getDate() + offset);
@@ -729,12 +749,17 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
       (date) => ["high", "very_high"].includes(businessDays.get(date)?.demand_level),
     );
     const mentorGroups = new Map();
+    const staffRelationWeights = buildStaffRelationWeightLookup(
+      staffRelations,
+      days.length,
+    );
     staffRelations.forEach((relation, relationIndex) => {
       if (!Boolean(relation.active)) return;
       const employeeId1 = String(relation.employee_id_1);
       const employeeId2 = String(relation.employee_id_2);
       if (!employeeMap.has(employeeId1) || !employeeMap.has(employeeId2)) return;
-      const weight = Math.max(0, integer(relation.weight));
+      const rawWeight = Math.max(0, integer(relation.weight));
+      const weight = staffRelationWeights.get(rawWeight) ?? rawWeight;
       const relationName = `relation_${safeName(relation.id ?? relationIndex)}`;
       if (relation.relation_type === "mentor_pair") {
         const employee1 = employeeMap.get(employeeId1);
