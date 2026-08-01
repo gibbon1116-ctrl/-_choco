@@ -35,7 +35,7 @@ function integer(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function buildStaffRelationWeightLookup(staffRelations, dayCount) {
+export function buildStaffRelationWeightLookup(staffRelations, dayCount, shiftCodeCount) {
   const tierCounts = new Map();
   Array.from(staffRelations ?? []).forEach((relation) => {
     if (!Boolean(relation.active) || relation.priority === "hard") return;
@@ -46,11 +46,12 @@ export function buildStaffRelationWeightLookup(staffRelations, dayCount) {
   const effectiveWeights = new Map();
   const tiersAscending = [...tierCounts.keys()].sort((left, right) => left - right);
   const days = Math.max(0, integer(dayCount));
+  const unitBound = days * Math.max(1, integer(shiftCodeCount));
   let lowerTierMaximum = 0;
   tiersAscending.forEach((rawWeight, tierIndex) => {
     const effectiveWeight = tierIndex === 0 ? rawWeight : lowerTierMaximum + 1;
     effectiveWeights.set(rawWeight, effectiveWeight);
-    lowerTierMaximum += effectiveWeight * tierCounts.get(rawWeight) * days;
+    lowerTierMaximum += effectiveWeight * tierCounts.get(rawWeight) * unitBound;
   });
   return effectiveWeights;
 }
@@ -752,6 +753,7 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
     const staffRelationWeights = buildStaffRelationWeightLookup(
       staffRelations,
       days.length,
+      shiftCodes.length,
     );
     staffRelations.forEach((relation, relationIndex) => {
       if (!Boolean(relation.active)) return;
@@ -796,15 +798,33 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
         relation.relation_type,
       )) {
         const selectedDays = relation.relation_type === "prefer_peak_pair" ? highDays : days;
-        if (selectedDays.length) {
+        selectedDays.forEach((date, dayIndex) => {
+          const firstTerms = positiveTerms(variablesForDay(employeeId1, date));
+          const secondTerms = positiveTerms(variablesForDay(employeeId2, date));
+          if (relation.priority === "hard") {
+            addHardConstraint(
+              "H11",
+              `h11_${relationName}_d${dayIndex}`,
+              [
+                ...firstTerms,
+                ...secondTerms.map((term) => ({
+                  coefficient: -1,
+                  variable: term.variable,
+                })),
+              ],
+              "=",
+              0,
+            );
+            return;
+          }
           addAbsDiff(
             model,
-            positiveTerms(variablesForEmployee(employeeId1, selectedDays)),
-            positiveTerms(variablesForEmployee(employeeId2, selectedDays)),
+            firstTerms,
+            secondTerms,
             weight,
-            relationName,
+            `${relationName}_d${dayIndex}`,
           );
-        }
+        });
         return;
       }
       if (
@@ -820,13 +840,31 @@ export function buildModel(targetMonth, data = {}, { random = Math.random } = {}
         ? (shiftCodeSet.has("L") ? ["L"] : [])
         : shiftCodes;
       days.forEach((date, dayIndex) => {
-        codes.forEach((shiftCode, shiftIndex) => addAndVar(
-          model,
-          variableFor(employeeId1, date, shiftCode),
-          variableFor(employeeId2, date, shiftCode),
-          weight,
-          `${relationName}_d${dayIndex}_c${shiftIndex}`,
-        ));
+        codes.forEach((shiftCode, shiftIndex) => {
+          const suffix = `${relationName}_d${dayIndex}_c${shiftIndex}`;
+          if (relation.priority === "hard") {
+            const pairVariables = [
+              variableFor(employeeId1, date, shiftCode),
+              variableFor(employeeId2, date, shiftCode),
+            ].filter(Boolean);
+            if (pairVariables.length < 2) return;
+            addHardConstraint(
+              "H11",
+              `h11_${suffix}`,
+              positiveTerms(pairVariables),
+              "<=",
+              1,
+            );
+            return;
+          }
+          addAndVar(
+            model,
+            variableFor(employeeId1, date, shiftCode),
+            variableFor(employeeId2, date, shiftCode),
+            weight,
+            suffix,
+          );
+        });
       });
     });
 

@@ -19,7 +19,7 @@ export const SOLVER_CONFIG = Object.freeze({
     close_to_open: 200,
     allergy_support_missing: 300,
   }),
-  solver_time_limit_seconds: 30,
+  solver_time_limit_seconds: 60,
 });
 
 export function penalty(name) {

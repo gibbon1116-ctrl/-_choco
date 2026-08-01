@@ -312,6 +312,9 @@ export async function precheck(targetMonth) {
       getBusinessDays(targetMonth),
     ]);
     const relations = allRelations.filter((relation) => Boolean(relation.active));
+    const activeEmployeeMap = new Map(active.map(
+      (employee) => [String(employee.employee_id), employee],
+    ));
 
     const english = skillSetting(settings, "english_support", "basic");
     const requiresEnglish = english.required_count > 0;
@@ -488,6 +491,27 @@ export async function precheck(targetMonth) {
     for (const relation of relations) {
       if (relation.employee_id_1 === relation.employee_id_2) {
         addIssue(issues, "error", "スタッフ配置条件に同じスタッフ同士の組み合わせがあります。／この配置条件を削除するか、異なる2人の職員を指定してください。");
+      }
+      if (relation.relation_type === "prefer_together" && relation.priority === "hard") {
+        const employee1 = activeEmployeeMap.get(String(relation.employee_id_1));
+        const employee2 = activeEmployeeMap.get(String(relation.employee_id_2));
+        if (employee1 && employee2) {
+          const minimum1 = Number(employee1.min_work_days);
+          const maximum1 = Number(employee1.max_work_days);
+          const minimum2 = Number(employee2.min_work_days);
+          const maximum2 = Number(employee2.max_work_days);
+          const lowerBound = Math.max(minimum1, minimum2);
+          const upperBound = Math.min(maximum1, maximum2);
+          if (lowerBound > upperBound) {
+            const label1 = `${employee1.name || employee1.employee_id}（${employee1.employee_id}）`;
+            const label2 = `${employee2.name || employee2.employee_id}（${employee2.employee_id}）`;
+            addIssue(
+              issues,
+              "error",
+              `必須の同時配置を優先する条件ですが、${label1} の勤務日数範囲 ${minimum1}～${maximum1} 日と ${label2} の勤務日数範囲 ${minimum2}～${maximum2} 日が重なりません。／いずれかの職員の最低・最大勤務日数を範囲が重なるように調整するか、配置条件の優先度を「できる限り」に変更・削除してください。`,
+            );
+          }
+        }
       }
       if (relation.relation_type === "never_together" && relation.priority === "hard") {
         for (const day of validDates) {
