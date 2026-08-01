@@ -3,10 +3,15 @@ import * as calendarApi from "./utils/calendar.js";
 import * as stateApi from "./state.js";
 import * as routerApi from "./router.js";
 import * as monthSelectorApi from "./components/monthSelector.js";
+import * as restaurantSkillsApi from "./utils/restaurantSkills.js";
 import { renderEmployeesPage } from "./pages/employees.js";
 import { renderShiftTypesPage } from "./pages/shiftTypes.js";
 import { renderRequirementsPage } from "./pages/requirements.js";
 import { renderRequestsPage } from "./pages/requests.js";
+import { renderStoreSettingsPage } from "./pages/storeSettings.js";
+import { renderStaffRelationsPage } from "./pages/staffRelations.js";
+import { renderCampaignsEventsPage } from "./pages/campaignsEvents.js";
+import { renderRoleRequirementsPage } from "./pages/roleRequirements.js";
 
 async function requestPersistentStorage() {
   if (!globalThis.navigator?.storage?.persist) {
@@ -25,6 +30,7 @@ globalThis.shiftScheduler = Object.freeze({
   ...stateApi,
   ...routerApi,
   ...monthSelectorApi,
+  ...restaurantSkillsApi,
 });
 
 function element(tagName, className, textContent = "") {
@@ -140,6 +146,22 @@ async function renderRoute(route, shell) {
     await renderRequestsPage(content);
     return;
   }
+  if (route.id === "settings") {
+    await renderStoreSettingsPage(content);
+    return;
+  }
+  if (route.id === "relations") {
+    await renderStaffRelationsPage(content);
+    return;
+  }
+  if (route.id === "campaigns") {
+    await renderCampaignsEventsPage(content);
+    return;
+  }
+  if (route.id === "roles") {
+    await renderRoleRequirementsPage(content);
+    return;
+  }
 
   const section = element("section", "placeholder-page");
   const heading = element("h1", "page-heading", route.label);
@@ -182,7 +204,7 @@ function mountApplication() {
   stateApi.subscribe((next, previous) => {
     if (
       next.targetMonth !== previous.targetMonth
-      && ["requirements", "requests"].includes(currentRoute.id)
+      && ["requirements", "requests", "campaigns", "roles"].includes(currentRoute.id)
     ) {
       void renderRoute(currentRoute, shell);
     }
@@ -195,7 +217,7 @@ async function initializeDataLayer() {
       databaseApi.openDatabase(),
       requestPersistentStorage(),
     ]);
-    console.info("勤務表メーカー Phase 4 を初期化しました。");
+    console.info("勤務表メーカー Phase 5 を初期化しました。");
   } catch (error) {
     console.error("勤務表メーカーの初期化に失敗しました。", error);
   }

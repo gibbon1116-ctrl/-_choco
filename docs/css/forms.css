@@ -574,6 +574,210 @@
   white-space: normal;
 }
 
+/* Phase 5: restaurant settings */
+.settings-form,
+.business-days-card {
+  margin-top: 1rem;
+}
+
+.settings-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.settings-mode-card,
+.settings-mode-card-wrap {
+  min-height: 70px;
+  padding: 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.settings-mode-card {
+  align-items: center;
+}
+
+.settings-mode-card-wrap .settings-mode-card {
+  min-height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.settings-mode-card-wrap .form-field__help {
+  display: block;
+  margin: 0.35rem 0 0 1.5rem;
+}
+
+.settings-skills-section {
+  padding: 1.1rem 1.2rem 1.25rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.settings-skills-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.settings-skills-header .form-section__title {
+  margin: 0;
+}
+
+.settings-skill-table-wrap {
+  max-height: min(62vh, 680px);
+}
+
+.settings-skill-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+}
+
+.settings-skill-table td {
+  vertical-align: middle;
+}
+
+.settings-skill-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+.settings-skill-table td:nth-child(3) {
+  width: 120px;
+}
+
+.settings-skill-table td:nth-child(4) {
+  min-width: 140px;
+}
+
+.settings-skill-name__label,
+.settings-skill-name__code {
+  display: block;
+}
+
+.settings-skill-name__label {
+  color: var(--color-navy);
+  font-weight: 700;
+}
+
+.settings-skill-name__code {
+  margin-top: 0.1rem;
+  color: var(--color-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.7rem;
+}
+
+.visually-labeled-control .form-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.settings-count-field .app-input {
+  min-width: 72px;
+  text-align: center;
+}
+
+.check-field-wrap {
+  display: flex;
+  min-height: 2.65rem;
+  align-items: center;
+  padding: 0 0.25rem;
+}
+
+.relation-table td:nth-child(7),
+.campaign-table td:nth-child(6) {
+  min-width: 150px;
+  white-space: normal;
+}
+
+.campaign-table td:nth-child(3) {
+  min-width: 190px;
+  white-space: nowrap;
+}
+
+.business-days-card .form-message-region {
+  padding: 0 1.2rem;
+}
+
+.business-grid-wrap {
+  max-height: min(65vh, 720px);
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.business-grid th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  min-width: 108px;
+  text-align: center;
+}
+
+.business-grid th:first-child {
+  min-width: 110px;
+}
+
+.business-grid th:nth-child(4),
+.business-grid th:nth-child(7) {
+  min-width: 180px;
+}
+
+.business-grid__date {
+  color: var(--color-navy);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.business-grid__control {
+  padding: 0.35rem !important;
+  text-align: center !important;
+}
+
+.business-grid__checkbox {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--color-accent);
+}
+
+.business-grid__text,
+.business-grid__select {
+  min-height: 2.2rem;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.8rem;
+}
+
+.business-grid__text {
+  min-width: 160px;
+}
+
+.business-grid tr.is-saturday td {
+  background: var(--color-saturday-bg);
+}
+
+.business-grid tr.is-sunday td {
+  background: var(--color-sunday-bg);
+}
+
+.role-requirements-table-wrap {
+  max-height: min(58vh, 620px);
+}
+
+.role-requirements-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+}
+
 @media (max-width: 768px) {
   .month-selector__label {
     display: none;
@@ -622,6 +826,15 @@
 
   .request-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-skills-section {
+    padding-right: 0.85rem;
+    padding-left: 0.85rem;
   }
 
   .template-grid,
