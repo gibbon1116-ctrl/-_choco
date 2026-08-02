@@ -78,7 +78,7 @@ export function createSampleData(targetMonth = "2026-08") {
       { employee_id_1: "E002", employee_id_2: "E012", relation_type: "mentor_pair", priority: "soft", weight: 150, active: true, note: "新人フォロー" },
       { employee_id_1: "E005", employee_id_2: "E006", relation_type: "avoid_together", priority: "soft", weight: 180, active: true, note: "配置バランス" },
       { employee_id_1: "E007", employee_id_2: "E008", relation_type: "prefer_peak_pair", priority: "soft", weight: 100, active: true, note: "繁忙対応" },
-      { employee_id_1: "E009", employee_id_2: "E010", relation_type: "never_together", priority: "hard", weight: 300, active: true, note: "同時配置禁止" },
+      { employee_id_1: "E009", employee_id_2: "E010", relation_type: "avoid_together", priority: "hard", weight: 300, active: true, note: "同時配置を避ける（必須）" },
     ],
     campaigns: [
       { product_name: "季節のアイスサンド", category: "ice", start_date: `${targetMonth}-05`, end_date: `${targetMonth}-12`, required_skill_level: 2, require_leader_first_week: true, note: "夏季新商品" },

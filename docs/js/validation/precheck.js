@@ -15,6 +15,7 @@ import {
   employeeHasRole,
   employeeHasSkill,
   englishLevelRank,
+  normalizeRelationType,
   skillLevelLabel,
 } from "../utils/restaurantSkills.js";
 
@@ -489,10 +490,11 @@ export async function precheck(targetMonth) {
       }
     }
     for (const relation of relations) {
+      const relationType = normalizeRelationType(relation.relation_type);
       if (relation.employee_id_1 === relation.employee_id_2) {
         addIssue(issues, "error", "スタッフ配置条件に同じスタッフ同士の組み合わせがあります。／この配置条件を削除するか、異なる2人の職員を指定してください。");
       }
-      if (relation.relation_type === "prefer_together" && relation.priority === "hard") {
+      if (relationType === "prefer_together" && relation.priority === "hard") {
         const employee1 = activeEmployeeMap.get(String(relation.employee_id_1));
         const employee2 = activeEmployeeMap.get(String(relation.employee_id_2));
         if (employee1 && employee2) {
@@ -513,15 +515,18 @@ export async function precheck(targetMonth) {
           }
         }
       }
-      if (relation.relation_type === "never_together" && relation.priority === "hard") {
+      if (
+        relationType === "avoid_together"
+        && relation.priority === "hard"
+      ) {
         for (const day of validDates) {
           const first = fixedLookup.get(personDayKey(relation.employee_id_1, day));
           const second = fixedLookup.get(personDayKey(relation.employee_id_2, day));
-          if (first && first === second) {
+          if (workShiftCodes.has(first) && workShiftCodes.has(second)) {
             addIssue(
               issues,
               "error",
-              `${day} の同時配置禁止と必須の勤務指定が矛盾しています（${relation.employee_id_1}・${relation.employee_id_2}）。／同時配置禁止またはいずれかの hard 希望を削除するか、優先度を「できる限り」に変更してください。`,
+              `${day} の「同時配置を避ける」条件と必須の勤務指定が矛盾しています（${relation.employee_id_1}・${relation.employee_id_2}）。／「同時配置を避ける」条件またはいずれかの必須の勤務指定を削除するか、優先度を「できる限り」に変更してください。`,
             );
             break;
           }

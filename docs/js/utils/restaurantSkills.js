@@ -49,11 +49,19 @@ export const SKILL_DEFINITIONS = Object.freeze([
 export const RELATION_LABELS = Object.freeze({
   prefer_together: "同時配置を優先",
   avoid_together: "同時配置を避ける",
-  never_together: "同時配置禁止",
+  never_together: "同時配置を避ける",
   mentor_pair: "教育係として組み合わせる",
   avoid_closing_pair: "閉店作業で組ませない",
   prefer_peak_pair: "繁忙時に組ませたい",
 });
+
+export const SELECTABLE_RELATION_TYPES = Object.freeze(
+  Object.keys(RELATION_LABELS).filter((type) => type !== "never_together"),
+);
+
+export function normalizeRelationType(type) {
+  return type === "never_together" ? "avoid_together" : type;
+}
 
 export const ROLE_LABELS = Object.freeze({
   manager: "店長・責任者",

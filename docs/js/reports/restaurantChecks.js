@@ -14,6 +14,7 @@ import {
   SKILL_DEFINITIONS,
   employeeHasRole,
   employeeHasSkill,
+  normalizeRelationType,
 } from "../utils/restaurantSkills.js";
 import { isoDate, parseIsoDate } from "../utils/calendar.js";
 
@@ -256,7 +257,7 @@ export async function restaurantConditionChecks(
   ).map((row) => String(row.date)));
   const mentorGroups = new Map();
   for (const relation of relations) {
-    if (relation.relation_type !== "mentor_pair") continue;
+    if (normalizeRelationType(relation.relation_type) !== "mentor_pair") continue;
     const employeeId1 = String(relation.employee_id_1);
     const employeeId2 = String(relation.employee_id_2);
     const employee1 = employees.get(employeeId1);
@@ -300,9 +301,9 @@ export async function restaurantConditionChecks(
       const same = shift1 === shift2 && shift1 !== "O";
       const bothWork = shift1 !== "O" && shift2 !== "O";
       const eitherWork = shift1 !== "O" || shift2 !== "O";
-      const type = relation.relation_type;
+      const type = normalizeRelationType(relation.relation_type);
       const violated = (
-        (["avoid_together", "never_together"].includes(type) && same)
+        (type === "avoid_together" && (relation.priority === "hard" ? bothWork : same))
         || (type === "avoid_closing_pair" && same && shift1 === "L")
         || (type === "prefer_together" && eitherWork && !bothWork)
         || (type === "prefer_peak_pair" && highDays.has(day) && eitherWork && !bothWork)

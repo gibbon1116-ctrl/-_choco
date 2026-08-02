@@ -10,6 +10,7 @@ import {
   employeeHasRole,
   employeeHasSkill,
   englishLevelRank,
+  normalizeRelationType,
 } from "../utils/restaurantSkills.js";
 import { penalty } from "./config.js";
 import {
@@ -513,33 +514,6 @@ export function buildModel(targetMonth, data = {}, {
       });
     }
 
-    // H11: hard never_together applies only to the same shift code.
-    staffRelations.forEach((relation, relationIndex) => {
-      const employeeId1 = String(relation.employee_id_1);
-      const employeeId2 = String(relation.employee_id_2);
-      if (
-        !Boolean(relation.active)
-        || relation.relation_type !== "never_together"
-        || relation.priority !== "hard"
-        || !employeeIds.has(employeeId1)
-        || !employeeIds.has(employeeId2)
-      ) return;
-      days.forEach((date, dayIndex) => {
-        shiftCodes.forEach((shiftCode, shiftIndex) => {
-          addHardConstraint(
-            "H11",
-            `h11_r${relationIndex}_d${dayIndex}_c${shiftIndex}`,
-            positiveTerms([
-              variableFor(employeeId1, date, shiftCode),
-              variableFor(employeeId2, date, shiftCode),
-            ]),
-            "<=",
-            1,
-          );
-        });
-      });
-    });
-
     // H12: a required shift cannot consist only of newcomers.
     const newcomers = employees.filter((employee) => Boolean(employee.is_new_staff));
     const experienced = employees.filter((employee) => !Boolean(employee.is_new_staff));
@@ -772,10 +746,11 @@ export function buildModel(targetMonth, data = {}, {
       const employeeId1 = String(relation.employee_id_1);
       const employeeId2 = String(relation.employee_id_2);
       if (!employeeMap.has(employeeId1) || !employeeMap.has(employeeId2)) return;
+      const relationType = normalizeRelationType(relation.relation_type);
       const rawWeight = Math.max(0, integer(relation.weight));
       const weight = staffRelationWeights.get(rawWeight) ?? rawWeight;
       const relationName = `relation_${safeName(relation.id ?? relationIndex)}`;
-      if (relation.relation_type === "mentor_pair") {
+      if (relationType === "mentor_pair") {
         const employee1 = employeeMap.get(employeeId1);
         const employee2 = employeeMap.get(employeeId2);
         const employee1IsMentee = Boolean(employee1.is_new_staff)
@@ -807,9 +782,9 @@ export function buildModel(targetMonth, data = {}, {
         return;
       }
       if (["prefer_together", "prefer_peak_pair"].includes(
-        relation.relation_type,
+        relationType,
       )) {
-        const selectedDays = relation.relation_type === "prefer_peak_pair" ? highDays : days;
+        const selectedDays = relationType === "prefer_peak_pair" ? highDays : days;
         selectedDays.forEach((date, dayIndex) => {
           const firstTerms = positiveTerms(variablesForDay(employeeId1, date));
           const secondTerms = positiveTerms(variablesForDay(employeeId2, date));
@@ -839,18 +814,59 @@ export function buildModel(targetMonth, data = {}, {
         });
         return;
       }
-      if (
-        relation.relation_type === "never_together"
-        && relation.priority === "hard"
-      ) return;
-      if (![
-        "avoid_together",
-        "never_together",
-        "avoid_closing_pair",
-      ].includes(relation.relation_type)) return;
-      const codes = relation.relation_type === "avoid_closing_pair"
-        ? (shiftCodeSet.has("L") ? ["L"] : [])
-        : shiftCodes;
+      if (relationType === "avoid_together") {
+        days.forEach((date, dayIndex) => {
+          if (relation.priority === "hard") {
+            addHardConstraint(
+              "H11",
+              `h11_${relationName}_d${dayIndex}`,
+              positiveTerms([
+                ...variablesForDay(employeeId1, date),
+                ...variablesForDay(employeeId2, date),
+              ]),
+              "<=",
+              1,
+            );
+            return;
+          }
+
+          shiftCodes.forEach((shiftCode, shiftIndex) => {
+            const pairVariables = [
+              variableFor(employeeId1, date, shiftCode),
+              variableFor(employeeId2, date, shiftCode),
+            ].filter(Boolean);
+            if (pairVariables.length < 2) return;
+            addHardConstraint(
+              "H11",
+              `h11_${relationName}_d${dayIndex}_c${shiftIndex}`,
+              positiveTerms(pairVariables),
+              "<=",
+              1,
+            );
+          });
+
+          const overlap = `overlap_${relationName}_d${dayIndex}`;
+          model.addContinuousVariable(overlap, { lower: 0, upper: 1 });
+          model.addSoftConstraint(
+            overlap,
+            [
+              { coefficient: 1, variable: overlap },
+              ...variablesForDay(employeeId1, date).map(
+                (variable) => ({ coefficient: -1, variable }),
+              ),
+              ...variablesForDay(employeeId2, date).map(
+                (variable) => ({ coefficient: -1, variable }),
+              ),
+            ],
+            ">=",
+            -1,
+          );
+          model.addObjectiveTerm(overlap, weight);
+        });
+        return;
+      }
+      if (relationType !== "avoid_closing_pair") return;
+      const codes = shiftCodeSet.has("L") ? ["L"] : [];
       days.forEach((date, dayIndex) => {
         codes.forEach((shiftCode, shiftIndex) => {
           const suffix = `${relationName}_d${dayIndex}_c${shiftIndex}`;

@@ -4,7 +4,11 @@ import {
   getAllStaffRelations,
   upsertStaffRelation,
 } from "../db/index.js";
-import { RELATION_LABELS } from "../utils/restaurantSkills.js";
+import {
+  RELATION_LABELS,
+  SELECTABLE_RELATION_TYPES,
+  normalizeRelationType,
+} from "../utils/restaurantSkills.js";
 import {
   createAlert,
   createButton,
@@ -20,7 +24,7 @@ import {
 
 const PRIORITY_LABELS = Object.freeze({ hard: "必須", soft: "できる限り" });
 const RELATION_OPTIONS = Object.freeze(
-  Object.entries(RELATION_LABELS).map(([value, label]) => ({ value, label })),
+  SELECTABLE_RELATION_TYPES.map((value) => ({ value, label: RELATION_LABELS[value] })),
 );
 const PRIORITY_OPTIONS = Object.freeze(
   Object.entries(PRIORITY_LABELS).map(([value, label]) => ({ value, label })),
@@ -144,7 +148,7 @@ function showRelationForm(editorHost, employees, relation, container) {
     label: "配置ルール",
     name: "relation_type",
     options: RELATION_OPTIONS,
-    value: current.relation_type,
+    value: normalizeRelationType(current.relation_type),
   });
   const priority = createSelect({
     label: "優先度",

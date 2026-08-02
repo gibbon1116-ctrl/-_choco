@@ -53,7 +53,7 @@ export const CONSTRAINT_GROUP_CATALOGUE = Object.freeze([
   }),
   Object.freeze({
     key: "H11",
-    label: "必須のスタッフ配置条件",
+    label: "スタッフ配置条件（同時配置の制限）",
     hint: "スタッフ配置相性設定を見直してください。",
   }),
   Object.freeze({
