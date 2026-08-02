@@ -10,13 +10,14 @@ import { getState } from "../state.js";
 import { runSolver } from "../solver/runSolver.js";
 import { diagnoseConstraintGroups } from "../validation/diagnoseConstraintGroups.js";
 import { GENERIC_INFEASIBILITY_CONDITION } from "../validation/diagnoseInfeasibility.js";
-import { blockingIssues, precheck } from "../validation/precheck.js";
+import { precheck } from "../validation/precheck.js";
 import {
   employeeSummary,
   requestViolations,
   shiftSummary,
 } from "../reports/summaries.js";
 import { restaurantConditionChecks } from "../reports/restaurantChecks.js";
+import { hardRuleViolations } from "../reports/ruleViolations.js";
 import { buildScheduleViewModel } from "../reports/viewModel.js";
 import {
   createAlert,
@@ -195,6 +196,25 @@ async function createDetails(targetMonth, assignments, settings, employees, shif
 
 async function renderSchedule(section, targetMonth, schedule, settings, employees, shiftTypes, ui, rerender) {
   const assignments = schedule.assignments ?? [];
+  if (schedule.status === "provisional") {
+    const violations = await hardRuleViolations(targetMonth, assignments);
+    const visibleLimit = 15;
+    const messages = violations.slice(0, visibleLimit).map(
+      (row) => `${row.category}：${row.message}`,
+    );
+    if (violations.length > visibleLimit) {
+      messages.push(`他${violations.length - visibleLimit}件あります。`);
+    }
+    const provisionalNotice = element("section", "");
+    provisionalNotice.append(
+      element("h2", "", "仮の勤務表：満たしていない条件"),
+      createAlert(
+        messages.length ? messages : "確認対象の必須条件違反は検出されませんでした。",
+        "warning",
+      ),
+    );
+    section.append(provisionalNotice);
+  }
   const viewModel = await buildScheduleViewModel(targetMonth, assignments);
   const controls = element("div", "dashboard-schedule-controls");
   const modes = element("div", "dashboard-view-modes");
@@ -326,7 +346,11 @@ export async function renderDashboardPage(container, notice = "") {
     ));
     const messages = element("div", "dashboard-message-region");
     section.append(messages);
-    if (notice) messages.append(createAlert(notice, "success"));
+    if (notice) {
+      const noticeMessage = typeof notice === "object" ? notice.message : notice;
+      const noticeType = typeof notice === "object" ? notice.type : "success";
+      messages.append(createAlert(noticeMessage, noticeType));
+    }
 
     createButtonNode.addEventListener("click", async () => {
       createButtonNode.disabled = true;
@@ -335,16 +359,22 @@ export async function renderDashboardPage(container, notice = "") {
         messages.replaceChildren(createAlert("事前チェックを実行しています。", "success"));
         const issues = await precheck(targetMonth);
         if (container._dashboardRenderToken !== renderToken) return;
-        const blockers = blockingIssues(issues);
-        if (blockers.length) {
-          appendIssueBanners(messages, issues);
-          return;
-        }
-        messages.replaceChildren(createAlert("HiGHSで勤務表を作成しています。しばらくお待ちください。", "success"));
+        // Pre-check findings are reported but no longer abort the run. When the conditions
+        // cannot all be met the solver falls back to a provisional schedule, which is more
+        // useful than refusing to produce anything - the unmet conditions are listed with it.
+        appendIssueBanners(messages, issues);
+        messages.append(createAlert("HiGHSで勤務表を作成しています。しばらくお待ちください。", "success"));
         const result = await runSolver(targetMonth);
         if (container._dashboardRenderToken !== renderToken) return;
         if (result.status === "success") {
           await renderDashboardPage(container, `勤務表を作成しました（目的関数: ${result.objectiveValue ?? 0}）。`);
+          return;
+        }
+        if (result.status === "provisional") {
+          await renderDashboardPage(container, {
+            message: `すべての条件を満たせなかったため、仮の勤務表を作成しました（未達${result.violations?.length ?? 0}件）。`,
+            type: "warning",
+          });
           return;
         }
         if (result.status === "infeasible") {
@@ -405,7 +435,7 @@ export async function renderDashboardPage(container, notice = "") {
       }
     });
 
-    if (schedule?.status !== "success" || !schedule?.assignments?.length) {
+    if (!["success", "provisional"].includes(schedule?.status) || !schedule?.assignments?.length) {
       const issues = await precheck(targetMonth);
       appendIssueBanners(messages, issues);
       section.append(createAlert("この月の自動作成結果はまだありません。条件を確認して「自動作成」を押してください。", "warning"));

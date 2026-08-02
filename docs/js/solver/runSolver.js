@@ -11,6 +11,7 @@ import {
   saveSchedule,
 } from "../db/index.js";
 import { diagnoseInfeasibility } from "../validation/diagnoseInfeasibility.js";
+import { hardRuleViolations } from "../reports/ruleViolations.js";
 import { buildModel } from "./buildModel.js";
 import { SOLVER_CONFIG } from "./config.js";
 
@@ -203,12 +204,13 @@ export async function runSolver(targetMonth, {
   workerFactory = createSolverWorker,
   diagnose = diagnoseInfeasibility,
   persistSchedule = saveSchedule,
+  reportViolations = hardRuleViolations,
   buildOptions = {},
 } = {}) {
   try {
     const solverData = data ?? await loadSolverData(targetMonth);
-    const model = buildModel(targetMonth, solverData, buildOptions);
-    const result = await solveModel(model, { timeLimitSeconds, workerFactory });
+    let model = buildModel(targetMonth, solverData, buildOptions);
+    let result = await solveModel(model, { timeLimitSeconds, workerFactory });
 
     if (result.status === "success") {
       const assignments = decodeAssignments(model, result.values);
@@ -228,6 +230,46 @@ export async function runSolver(targetMonth, {
         scheduleId,
         modelStats: model.stats,
       };
+    }
+
+    if (["infeasible", "error"].includes(result.status)) {
+      const provisionalModel = buildModel(targetMonth, solverData, {
+        ...buildOptions,
+        softenHardConstraints: true,
+      });
+      const provisionalResult = await solveModel(provisionalModel, {
+        timeLimitSeconds,
+        workerFactory,
+      });
+      if (provisionalResult.status === "success") {
+        const assignments = decodeAssignments(provisionalModel, provisionalResult.values);
+        const violations = await reportViolations(
+          targetMonth,
+          assignments,
+          { data: solverData },
+        );
+        const note = `満たしていない必須条件が${violations.length}件あります。`;
+        const scheduleId = await persistSchedule(
+          targetMonth,
+          "provisional",
+          assignments,
+          provisionalResult.objectiveValue,
+          provisionalResult.wallTimeMs,
+          note,
+        );
+        return {
+          ...provisionalResult,
+          status: "provisional",
+          assignments,
+          violations,
+          diagnostics: [],
+          objectiveValue: provisionalResult.objectiveValue,
+          scheduleId,
+          modelStats: provisionalModel.stats,
+        };
+      }
+      model = provisionalModel;
+      result = provisionalResult;
     }
 
     if (result.status === "infeasible") {

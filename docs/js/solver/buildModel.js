@@ -221,7 +221,11 @@ export function buildModel(targetMonth, data = {}, {
   random = Math.random,
   relaxGroups = [],
   feasibilityOnly = false,
+  softenHardConstraints = false,
 } = {}) {
+  if (feasibilityOnly && softenHardConstraints) {
+    throw new Error("実行可能性確認では必須制約のソフト化を同時に指定できません。");
+  }
   const relaxSet = new Set(relaxGroups ?? []);
   const days = monthDates(targetMonth);
   const employees = Array.from(data.employees ?? []).filter(
@@ -284,12 +288,63 @@ export function buildModel(targetMonth, data = {}, {
     Array.from({ length: 12 }, (_, index) => [`H${index + 1}`, 0]),
   );
   const addHardConstraint = (group, name, terms, operator, rightHandSide) => {
-    if (group !== "H1" && relaxSet.has(group)) return;
+    if (group !== "H1" && relaxSet.has(group) && !softenHardConstraints) return;
+    if (group !== "H1" && softenHardConstraints) {
+      const suffix = safeName(name);
+      const violationPenalty = penalty("hard_constraint_violation");
+      if (operator === "<=") {
+        const slack = `hard_slack_${suffix}`;
+        model.addContinuousVariable(slack);
+        model.addConstraint(
+          name,
+          [...terms, { coefficient: -1, variable: slack }],
+          operator,
+          rightHandSide,
+        );
+        model.addObjectiveTerm(slack, violationPenalty);
+      } else if (operator === ">=") {
+        const slack = `hard_slack_${suffix}`;
+        model.addContinuousVariable(slack);
+        model.addConstraint(
+          name,
+          [...terms, { coefficient: 1, variable: slack }],
+          operator,
+          rightHandSide,
+        );
+        model.addObjectiveTerm(slack, violationPenalty);
+      } else if (operator === "=") {
+        const over = `hard_over_${suffix}`;
+        const under = `hard_under_${suffix}`;
+        model.addContinuousVariable(over);
+        model.addContinuousVariable(under);
+        model.addConstraint(
+          name,
+          [
+            ...terms,
+            { coefficient: -1, variable: over },
+            { coefficient: 1, variable: under },
+          ],
+          operator,
+          rightHandSide,
+        );
+        model.addObjectiveTerm(over, violationPenalty);
+        model.addObjectiveTerm(under, violationPenalty);
+      } else {
+        throw new Error(`必須制約 ${name} の演算子 ${operator} はソフト化できません。`);
+      }
+      counts[group] += 1;
+      return;
+    }
     model.addConstraint(name, terms, operator, rightHandSide);
     counts[group] += 1;
   };
   const effectivePriority = (priority, group) => (
-    relaxSet.has(group) ? "soft" : priority
+    softenHardConstraints || relaxSet.has(group) ? "soft" : priority
+  );
+  const effectiveMinimumWeight = (priority, normalWeight) => (
+    softenHardConstraints && priority === "hard"
+      ? penalty("hard_constraint_violation")
+      : normalWeight
   );
 
   // H1: one shift per employee and day.
@@ -569,7 +624,7 @@ export function buildModel(targetMonth, data = {}, {
               )),
               needed,
               effectivePriority(english.priority, "SKILL"),
-              penalty("english_missing"),
+              effectiveMinimumWeight(english.priority, penalty("english_missing")),
               `english_${days.indexOf(date)}_${shiftIndex}`,
             );
           });
@@ -581,7 +636,7 @@ export function buildModel(targetMonth, data = {}, {
             )),
             needed,
             effectivePriority(english.priority, "SKILL"),
-            penalty("english_missing"),
+            effectiveMinimumWeight(english.priority, penalty("english_missing")),
             `english_${days.indexOf(date)}`,
           );
         }
@@ -600,7 +655,7 @@ export function buildModel(targetMonth, data = {}, {
         )),
         Math.max(1, allergy.requiredCount),
         effectivePriority(allergy.priority, "SKILL"),
-        penalty("allergy_support_missing"),
+        effectiveMinimumWeight(allergy.priority, penalty("allergy_support_missing")),
         `allergy_${dayIndex}`,
       ));
     }
@@ -632,7 +687,7 @@ export function buildModel(targetMonth, data = {}, {
           )),
           Math.max(1, newProduct.requiredCount),
           effectivePriority(newProduct.priority, "SKILL"),
-          penalty("new_product_missing"),
+          effectiveMinimumWeight(newProduct.priority, penalty("new_product_missing")),
           `new_product_${dayIndex}`,
         );
       }
@@ -694,7 +749,7 @@ export function buildModel(targetMonth, data = {}, {
         )),
         setting.requiredCount,
         effectivePriority(setting.priority, "SKILL"),
-        penalty("role_requirement_missing"),
+        effectiveMinimumWeight(setting.priority, penalty("role_requirement_missing")),
         `skill_${definition.code}_${dayIndex}`,
       ));
     }
@@ -713,7 +768,7 @@ export function buildModel(targetMonth, data = {}, {
         )),
         integer(requirement.required_count),
         effectivePriority(requirement.priority, "ROLE"),
-        penalty("role_requirement_missing"),
+        effectiveMinimumWeight(requirement.priority, penalty("role_requirement_missing")),
         `role_${safeName(requirement.id ?? requirementIndex)}`,
       );
     });

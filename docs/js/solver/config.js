@@ -1,5 +1,6 @@
 export const SOLVER_CONFIG = Object.freeze({
   penalties: Object.freeze({
+    hard_constraint_violation: 1000000,
     soft_request_off_violation: 100,
     prefer_request_not_satisfied: 20,
     avoid_shift_assigned: 50,
