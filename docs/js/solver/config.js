@@ -6,6 +6,7 @@ export const SOLVER_CONFIG = Object.freeze({
     workday_imbalance: 10,
     workday_target_deviation: 60,
     shift_type_imbalance: 30,
+    mentor_rank_preference: 40,
     shift_type_target_deviation: 100,
     same_shift_streak: 25,
     random_assignment_tiebreaker: 5,

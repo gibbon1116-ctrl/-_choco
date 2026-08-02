@@ -768,11 +768,14 @@ export function buildModel(targetMonth, data = {}, {
         const menteeId = firstToSecond ? employeeId1 : employeeId2;
         const mentorId = firstToSecond ? employeeId2 : employeeId1;
         const group = mentorGroups.get(menteeId) ?? {
-          mentors: new Set(),
+          mentors: new Map(),
           hard: false,
           softWeight: 0,
         };
-        group.mentors.add(mentorId);
+        group.mentors.set(
+          mentorId,
+          Math.max(group.mentors.get(mentorId) ?? 0, rawWeight),
+        );
         if (relation.priority === "hard") {
           group.hard = true;
         } else {
@@ -897,27 +900,68 @@ export function buildModel(targetMonth, data = {}, {
     });
 
     mentorGroups.forEach((group, menteeId) => {
-      const mentorIds = [...group.mentors].filter((mentorId) => employeeMap.has(mentorId));
-      if (!mentorIds.length) return;
+      const mentors = [...group.mentors].filter(([mentorId]) => employeeMap.has(mentorId));
+      if (!mentors.length) return;
       const menteeName = safeName(menteeId);
+      /**
+       * Draw a fresh preference order for one shift, so mentors are spread across the
+       * month in proportion to their weight instead of the heaviest one taking every
+       * slot. Weighted sampling without replacement via Efraimidis-Spirakis keys: the
+       * chance of being drawn first is weight / total weight, and the rest of the order
+       * is the fallback sequence used when an earlier pick cannot be scheduled.
+       */
+      const drawPreferenceOrder = (candidates) => new Map(
+        candidates
+          .map((candidate) => ({
+            mentorId: candidate.mentorId,
+            key: candidate.rawWeight > 0
+              ? Math.pow(random(), 1 / candidate.rawWeight)
+              : 0,
+          }))
+          .sort((left, right) => right.key - left.key)
+          .map(({ mentorId }, rank) => [mentorId, rank]),
+      );
       days.forEach((date, dayIndex) => {
+        // The mentee's own variable gates this, so it applies exactly on the shifts
+        // the newcomer actually works - including shifts whose required count is 0,
+        // which H3 still allows people to be assigned to.
         shiftCodes.forEach((shiftCode, shiftIndex) => {
-          if ((requirementMap.get(requirementKey(date, shiftCode)) ?? 0) < 1) return;
           const menteeVariable = variableFor(menteeId, date, shiftCode);
-          const mentorVariables = mentorIds.map(
-            (mentorId) => variableFor(mentorId, date, shiftCode),
-          ).filter(Boolean);
-          if (!menteeVariable || !mentorVariables.length) return;
+          const availableMentors = mentors.map(([mentorId, rawWeight]) => ({
+            mentorId,
+            rawWeight,
+            variable: variableFor(mentorId, date, shiftCode),
+          })).filter(({ variable }) => Boolean(variable));
+          if (!menteeVariable || !availableMentors.length) return;
           const suffix = `mentor_pair_${menteeName}_d${dayIndex}_c${shiftIndex}`;
+          const rankByMentor = drawPreferenceOrder(availableMentors);
+          const coverTerms = availableMentors.map(({ mentorId, variable }) => {
+            const cover = `cover_${suffix}_m${safeName(mentorId)}`;
+            model.addContinuousVariable(cover, { lower: 0, upper: 1 });
+            model.addSoftConstraint(
+              `${cover}_cap`,
+              [
+                { coefficient: 1, variable: cover },
+                { coefficient: -1, variable },
+              ],
+              "<=",
+              0,
+            );
+            model.addObjectiveTerm(
+              cover,
+              rankByMentor.get(mentorId) * penalty("mentor_rank_preference"),
+            );
+            return { coefficient: 1, variable: cover };
+          });
           if (group.hard) {
             addHardConstraint(
               "H12",
               `h12_${suffix}`,
               [
-                { coefficient: 1, variable: menteeVariable },
-                ...mentorVariables.map((variable) => ({ coefficient: -1, variable })),
+                ...coverTerms,
+                { coefficient: -1, variable: menteeVariable },
               ],
-              "<=",
+              ">=",
               0,
             );
             return;
@@ -928,7 +972,7 @@ export function buildModel(targetMonth, data = {}, {
           model.addSoftConstraint(
             suffix,
             [
-              ...positiveTerms(mentorVariables),
+              ...coverTerms,
               { coefficient: 1, variable: shortfall },
               { coefficient: -1, variable: menteeVariable },
             ],
