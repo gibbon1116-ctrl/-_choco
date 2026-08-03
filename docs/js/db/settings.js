@@ -13,6 +13,24 @@ function normalizePriority(priority) {
   return priority === "hard" ? "hard" : "soft";
 }
 
+function normalizeRequirementTemplate(input, current) {
+  if (input == null) return current;
+
+  const template = {};
+  if (typeof input !== "object" || Array.isArray(input)) return template;
+
+  for (const [inputShiftCode, values] of Object.entries(input)) {
+    if (typeof values !== "object" || values === null || Array.isArray(values)) continue;
+    const shiftCode = stringValue(inputShiftCode);
+    if (!shiftCode) continue;
+    template[shiftCode] = {
+      weekday: Math.min(99, Math.max(0, integerValue(values.weekday))),
+      weekend: Math.min(99, Math.max(0, integerValue(values.weekend))),
+    };
+  }
+  return template;
+}
+
 function normalizeSettings(data, current) {
   const defaults = createDefaultSettings();
   const source = current ?? defaults;
@@ -54,6 +72,10 @@ function normalizeSettings(data, current) {
     ),
     require_english_per_shift: Boolean(
       data.require_english_per_shift ?? source.require_english_per_shift,
+    ),
+    requirement_template: normalizeRequirementTemplate(
+      data.requirement_template,
+      source.requirement_template ?? defaults.requirement_template,
     ),
     skills,
   };

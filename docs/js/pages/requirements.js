@@ -1,7 +1,9 @@
 import {
   getAllShiftTypes,
   getRequirements,
+  getSettings,
   replaceRequirements,
+  saveSettings,
 } from "../db/index.js";
 import {
   displayDate,
@@ -23,7 +25,12 @@ import {
 
 let renderVersion = 0;
 
-function createTemplateEditor(shifts, targetMonth, container, gridHost, version) {
+function defaultTemplateValue(shiftCode, kind) {
+  if (kind === "weekday") return shiftCode === "D" ? 4 : 1;
+  return shiftCode === "D" ? 2 : (shiftCode === "N" ? 1 : 0);
+}
+
+function createTemplateEditor(shifts, targetMonth, container, gridHost, version, savedTemplate) {
   const section = element("section", "crud-card requirements-template");
   const header = element("div", "crud-card__header");
   const titleGroup = element("div");
@@ -42,13 +49,20 @@ function createTemplateEditor(shifts, targetMonth, container, gridHost, version)
   const grid = element("div", "template-grid");
 
   for (const shift of shifts) {
+    const savedValues = savedTemplate?.[shift.shift_code];
+    const weekdayValue = Number.isFinite(savedValues?.weekday)
+      ? savedValues.weekday
+      : defaultTemplateValue(shift.shift_code, "weekday");
+    const weekendValue = Number.isFinite(savedValues?.weekend)
+      ? savedValues.weekend
+      : defaultTemplateValue(shift.shift_code, "weekend");
     const group = element("fieldset", "template-shift");
     const legend = element("legend", "template-shift__title", `${shift.shift_name}（${shift.shift_code}）`);
     const weekday = createField({
       label: "平日",
       name: `weekday_${shift.shift_code}`,
       type: "number",
-      value: shift.shift_code === "D" ? 4 : 1,
+      value: weekdayValue,
       min: 0,
       max: 99,
       inputMode: "numeric",
@@ -57,7 +71,7 @@ function createTemplateEditor(shifts, targetMonth, container, gridHost, version)
       label: "土日",
       name: `weekend_${shift.shift_code}`,
       type: "number",
-      value: shift.shift_code === "D" ? 2 : (shift.shift_code === "N" ? 1 : 0),
+      value: weekendValue,
       min: 0,
       max: 99,
       inputMode: "numeric",
@@ -104,10 +118,28 @@ function createTemplateEditor(shifts, targetMonth, container, gridHost, version)
     try {
       await replaceRequirements(targetMonth, rows);
       if (version !== renderVersion || container.dataset.page !== "requirements") return;
+      const template = Object.fromEntries(shifts.map((shift) => {
+        const values = controls.get(shift.shift_code);
+        return [shift.shift_code, {
+          weekday: Number(values.weekday.value),
+          weekend: Number(values.weekend.value),
+        }];
+      }));
+      let templateSaveFailed = false;
+      try {
+        await saveSettings({ requirement_template: template });
+      } catch {
+        templateSaveFailed = true;
+      }
+      if (version !== renderVersion || container.dataset.page !== "requirements") return;
       const requirements = await getRequirements(targetMonth);
       if (version !== renderVersion || container.dataset.page !== "requirements") return;
       gridHost.replaceChildren(createRequirementsGrid(shifts, requirements, targetMonth, container));
-      showAlert(messageRegion, "テンプレートを適用しました。", "success");
+      if (templateSaveFailed) {
+        showAlert(messageRegion, "必要人数は適用しましたが、テンプレートの記録に失敗しました。");
+      } else {
+        showAlert(messageRegion, "テンプレートを適用しました。", "success");
+      }
     } catch (error) {
       showAlert(messageRegion, error.message || "テンプレートを適用できませんでした。");
     } finally {
@@ -217,10 +249,12 @@ export async function renderRequirementsPage(container, notice = null) {
 
   let shifts;
   let requirements;
+  let settings;
   try {
-    [shifts, requirements] = await Promise.all([
+    [shifts, requirements, settings] = await Promise.all([
       getAllShiftTypes(),
       getRequirements(targetMonth),
+      getSettings().catch(() => undefined),
     ]);
   } catch (error) {
     if (version !== renderVersion) return;
@@ -247,7 +281,14 @@ export async function renderRequirementsPage(container, notice = null) {
     const gridHost = element("div");
     gridHost.append(createRequirementsGrid(workShifts, requirements, targetMonth, container));
     page.append(
-      createTemplateEditor(workShifts, targetMonth, container, gridHost, version),
+      createTemplateEditor(
+        workShifts,
+        targetMonth,
+        container,
+        gridHost,
+        version,
+        settings?.requirement_template,
+      ),
       gridHost,
     );
   }

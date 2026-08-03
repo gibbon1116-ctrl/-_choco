@@ -105,6 +105,7 @@ export function createDefaultSettings() {
     weekend_required: 0,
     restaurant_mode: false,
     require_english_per_shift: false,
+    requirement_template: {},
     skills,
   };
 }
