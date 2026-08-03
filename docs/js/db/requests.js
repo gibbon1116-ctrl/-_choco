@@ -12,6 +12,11 @@ import {
   parseTargetMonth,
 } from "../utils/calendar.js";
 
+function createBatchId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function normalizeRequest(data, date = data.date) {
   return {
     target_month: stringValue(data.target_month),
@@ -21,6 +26,7 @@ function normalizeRequest(data, date = data.date) {
     shift_code: stringValue(data.shift_code),
     priority: stringValue(data.priority, "soft"),
     note: stringValue(data.note),
+    batch_id: stringValue(data.batch_id),
   };
 }
 
@@ -62,7 +68,8 @@ export function addRequestRange(data, startDate, endDate) {
   }
 
   const dates = monthDates(targetMonth).filter((date) => date >= start && date <= end);
-  const records = dates.map((date) => normalizeRequest(data, date));
+  const batchId = dates.length >= 2 ? createBatchId() : "";
+  const records = dates.map((date) => normalizeRequest({ ...data, batch_id: batchId }, date));
 
   return runTransaction("requests", "readwrite", async (transaction) => {
     const store = transaction.objectStore("requests");
@@ -79,4 +86,63 @@ export function deleteRequest(id) {
       transaction.objectStore("requests").delete(integerValue(id)),
     ),
   );
+}
+
+export function deleteRequestBatch(targetMonth, batchId) {
+  const normalizedBatchId = stringValue(batchId);
+  if (!normalizedBatchId) return Promise.resolve(0);
+
+  return runTransaction("requests", "readwrite", async (transaction) => {
+    const store = transaction.objectStore("requests");
+    const records = await requestToPromise(
+      store.index("by_month").getAll(stringValue(targetMonth)),
+    );
+    const matching = records.filter((record) => record.batch_id === normalizedBatchId);
+    for (const record of matching) {
+      await requestToPromise(store.delete(record.id));
+    }
+    return matching.length;
+  });
+}
+
+export function deleteRequests(ids) {
+  const normalizedIds = [...new Set(ids.map((id) => integerValue(id)))];
+  if (!normalizedIds.length) return Promise.resolve(0);
+
+  return runTransaction("requests", "readwrite", async (transaction) => {
+    const store = transaction.objectStore("requests");
+    let deletedCount = 0;
+    for (const id of normalizedIds) {
+      const record = await requestToPromise(store.get(id));
+      if (record === undefined) continue;
+      await requestToPromise(store.delete(id));
+      deletedCount += 1;
+    }
+    return deletedCount;
+  });
+}
+
+export function updateRequests(ids, changes) {
+  const normalizedIds = [...new Set(ids.map((id) => integerValue(id)))];
+  const allowedKeys = ["request_type", "shift_code", "priority", "note"];
+  const acceptedChanges = Object.fromEntries(
+    allowedKeys
+      .filter((key) => Object.hasOwn(changes, key))
+      .map((key) => [key, stringValue(changes[key])]),
+  );
+  if (!normalizedIds.length) return Promise.resolve(0);
+
+  return runTransaction("requests", "readwrite", async (transaction) => {
+    const store = transaction.objectStore("requests");
+    let updatedCount = 0;
+    for (const id of normalizedIds) {
+      const record = await requestToPromise(store.get(id));
+      if (record === undefined) continue;
+      const updated = { ...record, ...acceptedChanges };
+      if (updated.request_type === "off") updated.shift_code = "O";
+      await requestToPromise(store.put(updated));
+      updatedCount += 1;
+    }
+    return updatedCount;
+  });
 }

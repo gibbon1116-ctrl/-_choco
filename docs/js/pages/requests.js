@@ -2,9 +2,12 @@ import {
   addRequest,
   addRequestRange,
   deleteRequest,
+  deleteRequestBatch,
+  deleteRequests,
   getActiveEmployees,
   getAllShiftTypes,
   getRequests,
+  updateRequests,
 } from "../db/index.js";
 import { getState } from "../state.js";
 import { monthLabel } from "../components/monthSelector.js";
@@ -12,6 +15,7 @@ import { displayDate, monthDates } from "../utils/calendar.js";
 import {
   createAlert,
   createButton,
+  createCheckbox,
   createField,
   createLoading,
   createPageHeading,
@@ -41,6 +45,7 @@ const PRIORITY_LABELS = Object.freeze(Object.fromEntries(
 ));
 
 let renderVersion = 0;
+let sortState = { key: "date", direction: "asc" };
 
 function selectOptions(records, valueKey, label) {
   return records.map((record) => ({
@@ -147,6 +152,62 @@ function requestData(controls, targetMonth) {
   };
 }
 
+function groupRequests(requests) {
+  const sorted = [...requests].sort((left, right) =>
+    left.date.localeCompare(right.date) || Number(left.id) - Number(right.id),
+  );
+  const grouped = new Map();
+
+  for (const request of sorted) {
+    const batchId = request.batch_id ?? "";
+    const key = batchId ? `batch:${batchId}` : `request:${request.id}`;
+    if (!grouped.has(key)) grouped.set(key, { batchId, requests: [] });
+    grouped.get(key).requests.push(request);
+  }
+
+  return [...grouped.values()].map((group) => ({
+    ...group,
+    first: group.requests[0].date,
+    last: group.requests.at(-1).date,
+    count: group.requests.length,
+  }));
+}
+
+function sortGroups(groups, employeeNames) {
+  const requestTypeOrder = new Map(REQUEST_TYPES.map((item, index) => [item.value, index]));
+  const priorityOrder = new Map(PRIORITIES.map((item, index) => [item.value, index]));
+
+  return [...groups].sort((left, right) => {
+    const leftRequest = left.requests[0];
+    const rightRequest = right.requests[0];
+    let comparison = 0;
+
+    if (sortState.key === "date") {
+      comparison = left.first.localeCompare(right.first);
+    } else if (sortState.key === "employee") {
+      const leftName = employeeNames.get(leftRequest.employee_id) ?? leftRequest.employee_id;
+      const rightName = employeeNames.get(rightRequest.employee_id) ?? rightRequest.employee_id;
+      comparison = String(leftName).localeCompare(String(rightName), "ja");
+    } else if (sortState.key === "request_type") {
+      comparison = (requestTypeOrder.get(leftRequest.request_type) ?? -1)
+        - (requestTypeOrder.get(rightRequest.request_type) ?? -1);
+    } else if (sortState.key === "shift_code") {
+      comparison = String(leftRequest.shift_code ?? "").localeCompare(
+        String(rightRequest.shift_code ?? ""),
+      );
+    } else if (sortState.key === "priority") {
+      comparison = (priorityOrder.get(leftRequest.priority) ?? -1)
+        - (priorityOrder.get(rightRequest.priority) ?? -1);
+    }
+
+    if (comparison) {
+      return sortState.direction === "desc" ? -comparison : comparison;
+    }
+    return left.first.localeCompare(right.first)
+      || Number(leftRequest.id) - Number(rightRequest.id);
+  });
+}
+
 function createRequestForm({ mode, employees, shifts, targetMonth, container }) {
   const isRange = mode === "range";
   const form = element("form", "crud-form request-form");
@@ -217,39 +278,77 @@ function createRequestForm({ mode, employees, shifts, targetMonth, container }) 
   return form;
 }
 
-function createRequestsTable(requests, employees, shifts, container, noticeRegion) {
+function createRequestsTable(requests, employees, shifts, container, noticeRegion, targetMonth) {
   if (!requests.length) {
     return element("p", "empty-state", "希望はまだ登録されていません。");
   }
   const employeeNames = new Map(employees.map((item) => [item.employee_id, item.name]));
   const shiftNames = new Map(shifts.map((item) => [item.shift_code, item.shift_name]));
-  const sorted = [...requests].sort((left, right) =>
-    left.date.localeCompare(right.date) || Number(left.id) - Number(right.id),
-  );
+  const groups = groupRequests(requests);
+  const selectedIds = new Set();
+  const expandedBatchIds = new Set();
+  const allIds = requests.map((request) => Number(request.id));
+  const host = element("div");
+  const editorHost = element("div", "editor-host");
+  const bulkBar = element("div", "request-bulk-bar");
+  const bulkCount = element("span", "request-bulk-bar__count");
+  const bulkActions = element("div", "table-actions__inner");
+  const bulkEditButton = createButton("まとめて編集", { variant: "secondary" });
+  bulkEditButton.dataset.action = "bulk-edit-requests";
+  const bulkDeleteButton = createButton("まとめて削除", { variant: "danger" });
+  bulkDeleteButton.dataset.action = "bulk-delete-requests";
+  bulkActions.append(bulkEditButton, bulkDeleteButton);
+  bulkBar.append(bulkCount, bulkActions);
   const wrapper = element("div", "app-table-wrap");
   const table = element("table", "app-table request-table");
-  const head = element("thead");
-  const headerRow = element("tr");
-  for (const label of ["日付", "職員", "希望種別", "勤務区分", "優先度", "備考", "操作"]) {
-    headerRow.append(element("th", "", label));
-  }
-  head.append(headerRow);
-  const body = element("tbody");
+  const selectionControls = [];
+  let selectAllInput;
 
-  for (const request of sorted) {
-    const row = element("tr");
+  const requestValues = (request) => {
     const shiftLabel = shiftNames.get(request.shift_code) ?? request.shift_code ?? "—";
-    const values = [
-      displayDate(request.date),
+    return [
       employeeNames.get(request.employee_id) ?? request.employee_id,
       REQUEST_TYPE_LABELS[request.request_type] ?? "不明",
       request.shift_code ? `${shiftLabel}（${request.shift_code}）` : "—",
       PRIORITY_LABELS[request.priority] ?? request.priority,
       request.note || "—",
     ];
-    values.forEach((value, index) => row.append(element("td", index === 0 ? "table-key" : "", String(value))));
+  };
 
-    const actionCell = element("td", "table-actions");
+  const updateSelectionUi = () => {
+    const selectedCount = selectedIds.size;
+    bulkCount.textContent = selectedCount
+      ? `${selectedCount}件を選択中`
+      : "希望を選択すると一括操作できます。";
+    bulkEditButton.disabled = selectedCount === 0;
+    bulkDeleteButton.disabled = selectedCount === 0;
+
+    if (selectAllInput) {
+      selectAllInput.checked = selectedCount === allIds.length;
+      selectAllInput.indeterminate = selectedCount > 0 && selectedCount < allIds.length;
+    }
+    for (const { input, ids } of selectionControls) {
+      const count = ids.filter((id) => selectedIds.has(id)).length;
+      input.checked = count === ids.length;
+      input.indeterminate = count > 0 && count < ids.length;
+    }
+  };
+
+  const addSelectionCheckbox = (cell, ids, ariaLabel) => {
+    const checkbox = createCheckbox({ label: "", name: "request_selection" });
+    checkbox.input.setAttribute("aria-label", ariaLabel);
+    checkbox.input.addEventListener("change", () => {
+      for (const id of ids) {
+        if (checkbox.input.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+      }
+      updateSelectionUi();
+    });
+    selectionControls.push({ input: checkbox.input, ids });
+    cell.append(checkbox.wrapper);
+  };
+
+  const createDeleteButton = (request) => {
     const deleteButton = createButton("削除", { variant: "danger", className: "app-button--small" });
     deleteButton.dataset.action = "delete-request";
     deleteButton.dataset.requestId = String(request.id);
@@ -267,13 +366,305 @@ function createRequestsTable(requests, employees, shifts, container, noticeRegio
         showAlert(noticeRegion, error.message || "希望を削除できませんでした。");
       }
     });
-    actionCell.append(deleteButton);
-    row.append(actionCell);
-    body.append(row);
-  }
-  table.append(head, body);
+    return deleteButton;
+  };
+
+  const renderTable = () => {
+    selectionControls.length = 0;
+    const head = element("thead");
+    const headerRow = element("tr");
+    const selectionHeader = element("th", "request-table__select");
+    const selectAll = createCheckbox({ label: "", name: "request_select_all" });
+    selectAllInput = selectAll.input;
+    selectAllInput.setAttribute("aria-label", "すべて選択");
+    selectAllInput.addEventListener("change", () => {
+      for (const id of allIds) {
+        if (selectAllInput.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+      }
+      updateSelectionUi();
+    });
+    selectionHeader.append(selectAll.wrapper);
+    headerRow.append(selectionHeader);
+
+    const headers = [
+      { label: "日付", key: "date" },
+      { label: "職員", key: "employee" },
+      { label: "希望種別", key: "request_type" },
+      { label: "勤務区分", key: "shift_code" },
+      { label: "優先度", key: "priority" },
+    ];
+    for (const { label, key } of headers) {
+      const header = element("th");
+      const active = sortState.key === key;
+      header.setAttribute(
+        "aria-sort",
+        active ? (sortState.direction === "asc" ? "ascending" : "descending") : "none",
+      );
+      const symbol = active ? (sortState.direction === "asc" ? "▲" : "▼") : "";
+      const sortButton = element("button", "app-table__sort", `${label}${symbol ? ` ${symbol}` : ""}`);
+      sortButton.type = "button";
+      sortButton.dataset.sortKey = key;
+      sortButton.addEventListener("click", () => {
+        sortState = sortState.key === key
+          ? { key, direction: sortState.direction === "asc" ? "desc" : "asc" }
+          : { key, direction: "asc" };
+        renderTable();
+      });
+      header.append(sortButton);
+      headerRow.append(header);
+    }
+    headerRow.append(element("th", "", "備考"), element("th", "", "操作"));
+    head.append(headerRow);
+
+    const body = element("tbody");
+    for (const group of sortGroups(groups, employeeNames)) {
+      const firstRequest = group.requests[0];
+      const groupIds = group.requests.map((request) => Number(request.id));
+
+      if (group.count === 1) {
+        const row = element("tr");
+        const selectionCell = element("td", "request-table__select");
+        addSelectionCheckbox(
+          selectionCell,
+          groupIds,
+          `${displayDate(firstRequest.date)}の希望を選択`,
+        );
+        row.append(selectionCell, element("td", "table-key", displayDate(firstRequest.date)));
+        for (const value of requestValues(firstRequest)) row.append(element("td", "", String(value)));
+        const actionCell = element("td", "table-actions");
+        actionCell.append(createDeleteButton(firstRequest));
+        row.append(actionCell);
+        body.append(row);
+        continue;
+      }
+
+      const row = element("tr", "request-table__group");
+      const selectionCell = element("td", "request-table__select");
+      addSelectionCheckbox(
+        selectionCell,
+        groupIds,
+        `${displayDate(group.first)} 〜 ${displayDate(group.last)} の希望${group.count}件を選択`,
+      );
+      row.append(selectionCell);
+      const dateCell = element("td", "table-key");
+      dateCell.append(
+        element("span", "", `${displayDate(group.first)} 〜 ${displayDate(group.last)}`),
+        element("span", "count-badge", `${group.count}日`),
+      );
+      row.append(dateCell);
+      for (const value of requestValues(firstRequest)) row.append(element("td", "", String(value)));
+
+      const actionCell = element("td", "table-actions");
+      const actionInner = element("div", "table-actions__inner");
+      const isExpanded = expandedBatchIds.has(group.batchId);
+      const toggleButton = createButton(isExpanded ? "折りたたむ" : "展開", {
+        variant: "secondary",
+        className: "app-button--small",
+      });
+      toggleButton.dataset.action = "toggle-request-group";
+      toggleButton.setAttribute("aria-expanded", String(isExpanded));
+      const batchDeleteButton = createButton("削除", {
+        variant: "danger",
+        className: "app-button--small",
+      });
+      batchDeleteButton.dataset.action = "delete-request-batch";
+      const childRows = [];
+      toggleButton.addEventListener("click", () => {
+        const expanded = !expandedBatchIds.has(group.batchId);
+        if (expanded) expandedBatchIds.add(group.batchId);
+        else expandedBatchIds.delete(group.batchId);
+        for (const childRow of childRows) childRow.hidden = !expanded;
+        toggleButton.textContent = expanded ? "折りたたむ" : "展開";
+        toggleButton.setAttribute("aria-expanded", String(expanded));
+      });
+      batchDeleteButton.addEventListener("click", async () => {
+        const confirmed = globalThis.confirm?.(
+          `${displayDate(group.first)} 〜 ${displayDate(group.last)} の希望${group.count}件をまとめて削除しますか？`,
+        ) ?? true;
+        if (!confirmed) return;
+        batchDeleteButton.disabled = true;
+        try {
+          await deleteRequestBatch(targetMonth, group.batchId);
+          await renderRequestsPage(container, {
+            type: "success",
+            message: "希望をまとめて削除しました。",
+          });
+        } catch (error) {
+          batchDeleteButton.disabled = false;
+          showAlert(noticeRegion, error.message || "希望をまとめて削除できませんでした。");
+        }
+      });
+      actionInner.append(toggleButton, batchDeleteButton);
+      actionCell.append(actionInner);
+      row.append(actionCell);
+      body.append(row);
+
+      for (const request of group.requests) {
+        const childRow = element("tr", "request-table__child");
+        childRow.hidden = !isExpanded;
+        const childSelectionCell = element("td", "request-table__select");
+        addSelectionCheckbox(
+          childSelectionCell,
+          [Number(request.id)],
+          `${displayDate(request.date)}の希望を選択`,
+        );
+        childRow.append(
+          childSelectionCell,
+          element("td", "table-key", displayDate(request.date)),
+        );
+        for (let index = 0; index < 5; index += 1) childRow.append(element("td"));
+        const childActionCell = element("td", "table-actions");
+        childActionCell.append(createDeleteButton(request));
+        childRow.append(childActionCell);
+        childRows.push(childRow);
+        body.append(childRow);
+      }
+    }
+    table.replaceChildren(head, body);
+    updateSelectionUi();
+  };
+
+  const showBulkEditForm = () => {
+    const ids = [...selectedIds];
+    const count = ids.length;
+    const form = element("form", "crud-form request-bulk-form");
+    form.noValidate = true;
+    const header = element("div", "crud-form__header");
+    const titleGroup = element("div");
+    titleGroup.append(
+      element("h2", "crud-form__title", `選択した${count}件をまとめて編集`),
+      element(
+        "p",
+        "crud-form__caption",
+        "変更したい項目だけを選びます。「変更しない」のままの項目はそのまま残ります。",
+      ),
+    );
+    header.append(titleGroup);
+    const messageRegion = element("div", "form-message-region");
+    const grid = element("div", "form-grid form-grid--three");
+    const noChangeOption = { value: "", label: "（変更しない）" };
+    const requestType = createSelect({
+      label: "希望種別",
+      name: "bulk_request_type",
+      options: [noChangeOption, ...REQUEST_TYPES],
+      value: "",
+    });
+    const shift = createSelect({
+      label: "勤務区分",
+      name: "bulk_shift_code",
+      options: [
+        noChangeOption,
+        ...selectOptions(shifts, "shift_code", (item) => `${item.shift_name}（${item.shift_code}）`),
+      ],
+      value: "",
+    });
+    const priority = createSelect({
+      label: "優先度",
+      name: "bulk_priority",
+      options: [noChangeOption, ...PRIORITIES],
+      value: "",
+    });
+    const noteToggle = createCheckbox({
+      label: "備考を変更する",
+      name: "bulk_change_note",
+    });
+    const note = createTextArea({
+      label: "備考",
+      name: "bulk_note",
+      value: "",
+      rows: 2,
+      wide: true,
+    });
+    note.input.disabled = true;
+    noteToggle.input.addEventListener("change", () => {
+      note.input.disabled = !noteToggle.input.checked;
+    });
+
+    let editableShift = "";
+    shift.input.addEventListener("change", () => {
+      if (!shift.input.disabled) editableShift = shift.input.value;
+    });
+    const syncShiftControl = () => {
+      const isOff = requestType.input.value === "off";
+      if (isOff) {
+        if (!shift.input.disabled) editableShift = shift.input.value;
+        shift.input.value = "O";
+      } else if (shift.input.disabled) {
+        shift.input.value = editableShift;
+      }
+      shift.input.disabled = isOff;
+    };
+    requestType.input.addEventListener("change", syncShiftControl);
+    syncShiftControl();
+
+    grid.append(
+      requestType.wrapper,
+      shift.wrapper,
+      priority.wrapper,
+      noteToggle.wrapper,
+      note.wrapper,
+    );
+    const actions = element("div", "form-actions");
+    const applyButton = createButton(`選択した${count}件に適用`, { variant: "primary" });
+    applyButton.type = "submit";
+    const cancelButton = createButton("キャンセル", { variant: "secondary" });
+    cancelButton.addEventListener("click", () => editorHost.replaceChildren());
+    actions.append(applyButton, cancelButton);
+    form.append(header, messageRegion, grid, actions);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const changes = {};
+      if (requestType.input.value) changes.request_type = requestType.input.value;
+      if (requestType.input.value === "off") changes.shift_code = "O";
+      else if (shift.input.value) changes.shift_code = shift.input.value;
+      if (priority.input.value) changes.priority = priority.input.value;
+      if (noteToggle.input.checked) changes.note = note.input.value;
+      if (!Object.keys(changes).length) {
+        showAlert(messageRegion, "変更する項目を1つ以上選んでください。");
+        return;
+      }
+
+      applyButton.disabled = true;
+      try {
+        await updateRequests(ids, changes);
+        await renderRequestsPage(container, {
+          type: "success",
+          message: "選択した希望を更新しました。",
+        });
+      } catch (error) {
+        applyButton.disabled = false;
+        showAlert(messageRegion, error.message || "選択した希望を更新できませんでした。");
+      }
+    });
+
+    editorHost.replaceChildren(form);
+    editorHost.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+
+  bulkEditButton.addEventListener("click", showBulkEditForm);
+  bulkDeleteButton.addEventListener("click", async () => {
+    const count = selectedIds.size;
+    const confirmed = globalThis.confirm?.(`選択した${count}件の希望を削除しますか？`) ?? true;
+    if (!confirmed) return;
+    bulkDeleteButton.disabled = true;
+    try {
+      await deleteRequests([...selectedIds]);
+      await renderRequestsPage(container, {
+        type: "success",
+        message: "選択した希望を削除しました。",
+      });
+    } catch (error) {
+      bulkDeleteButton.disabled = false;
+      showAlert(noticeRegion, error.message || "選択した希望を削除できませんでした。");
+    }
+  });
+
+  renderTable();
   wrapper.append(table);
-  return wrapper;
+  host.append(editorHost, bulkBar, wrapper);
+  return host;
 }
 
 export async function renderRequestsPage(container, notice = null) {
@@ -317,7 +708,10 @@ export async function renderRequestsPage(container, notice = null) {
     element("h2", "crud-card__title", `${monthLabel(targetMonth)}の希望一覧`),
     element("span", "count-badge", `${requests.length}件`),
   );
-  listSection.append(listHeader, createRequestsTable(requests, employees, shifts, container, noticeRegion));
+  listSection.append(
+    listHeader,
+    createRequestsTable(requests, employees, shifts, container, noticeRegion, targetMonth),
+  );
 
   const forms = element("div", "request-form-grid");
   forms.append(

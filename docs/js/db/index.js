@@ -50,8 +50,11 @@ export {
   addRequest,
   addRequestRange,
   deleteRequest,
+  deleteRequestBatch,
+  deleteRequests,
   getRequests,
   getRequestsByEmployee,
+  updateRequests,
 } from "./requests.js";
 export {
   getSchedules,
