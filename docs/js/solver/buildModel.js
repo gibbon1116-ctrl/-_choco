@@ -222,6 +222,7 @@ export function buildModel(targetMonth, data = {}, {
   relaxGroups = [],
   feasibilityOnly = false,
   softenHardConstraints = false,
+  keepUserHardConstraints = false,
 } = {}) {
   if (feasibilityOnly && softenHardConstraints) {
     throw new Error("実行可能性確認では必須制約のソフト化を同時に指定できません。");
@@ -287,9 +288,19 @@ export function buildModel(targetMonth, data = {}, {
   const counts = Object.fromEntries(
     Array.from({ length: 12 }, (_, index) => [`H${index + 1}`, 0]),
   );
-  const addHardConstraint = (group, name, terms, operator, rightHandSide) => {
+  const addHardConstraint = (
+    group,
+    name,
+    terms,
+    operator,
+    rightHandSide,
+    { userHard = false } = {},
+  ) => {
     if (group !== "H1" && relaxSet.has(group) && !softenHardConstraints) return;
-    if (group !== "H1" && softenHardConstraints) {
+    const softenThis = group !== "H1"
+      && softenHardConstraints
+      && !(userHard && keepUserHardConstraints);
+    if (softenThis) {
       const suffix = safeName(name);
       const violationPenalty = penalty("hard_constraint_violation");
       if (operator === "<=") {
@@ -479,6 +490,7 @@ export function buildModel(targetMonth, data = {}, {
           positiveTerms(dailyVariables),
           "=",
           0,
+          { userHard: true },
         );
       } else if (
         request.request_type === "fixed"
@@ -490,6 +502,7 @@ export function buildModel(targetMonth, data = {}, {
           positiveTerms([variableFor(employeeId, date, shiftCode)]),
           "=",
           1,
+          { userHard: true },
         );
       } else if (request.request_type === "prefer" && shiftCodeSet.has(shiftCode)) {
         for (const otherCode of shiftCodes) {
@@ -500,6 +513,7 @@ export function buildModel(targetMonth, data = {}, {
             positiveTerms([variableFor(employeeId, date, otherCode)]),
             "=",
             0,
+            { userHard: true },
           );
         }
       } else if (request.request_type === "avoid" && shiftCodeSet.has(shiftCode)) {
@@ -509,6 +523,7 @@ export function buildModel(targetMonth, data = {}, {
           positiveTerms([variableFor(employeeId, date, shiftCode)]),
           "=",
           0,
+          { userHard: true },
         );
       }
       return;
@@ -859,6 +874,7 @@ export function buildModel(targetMonth, data = {}, {
               ],
               "=",
               0,
+              { userHard: true },
             );
             return;
           }
@@ -884,6 +900,7 @@ export function buildModel(targetMonth, data = {}, {
               ]),
               "<=",
               1,
+              { userHard: true },
             );
             return;
           }
@@ -940,6 +957,7 @@ export function buildModel(targetMonth, data = {}, {
               positiveTerms(pairVariables),
               "<=",
               1,
+              { userHard: true },
             );
             return;
           }
@@ -1018,6 +1036,7 @@ export function buildModel(targetMonth, data = {}, {
               ],
               ">=",
               0,
+              { userHard: true },
             );
             return;
           }

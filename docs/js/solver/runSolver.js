@@ -233,6 +233,44 @@ export async function runSolver(targetMonth, {
     }
 
     if (["infeasible", "error"].includes(result.status)) {
+      const keptUserHardModel = buildModel(targetMonth, solverData, {
+        ...buildOptions,
+        softenHardConstraints: true,
+        keepUserHardConstraints: true,
+      });
+      const keptUserHardResult = await solveModel(keptUserHardModel, {
+        timeLimitSeconds,
+        workerFactory,
+      });
+      if (keptUserHardResult.status === "success") {
+        const assignments = decodeAssignments(keptUserHardModel, keptUserHardResult.values);
+        const violations = await reportViolations(
+          targetMonth,
+          assignments,
+          { data: solverData },
+        );
+        const note = `希望・相性の必須条件は満たしています。満たしていない条件が${violations.length}件あります。`;
+        const scheduleId = await persistSchedule(
+          targetMonth,
+          "provisional",
+          assignments,
+          keptUserHardResult.objectiveValue,
+          keptUserHardResult.wallTimeMs,
+          note,
+        );
+        return {
+          ...keptUserHardResult,
+          status: "provisional",
+          assignments,
+          violations,
+          diagnostics: [],
+          objectiveValue: keptUserHardResult.objectiveValue,
+          scheduleId,
+          modelStats: keptUserHardModel.stats,
+          keptUserHardConstraints: true,
+        };
+      }
+
       const provisionalModel = buildModel(targetMonth, solverData, {
         ...buildOptions,
         softenHardConstraints: true,
@@ -248,7 +286,7 @@ export async function runSolver(targetMonth, {
           assignments,
           { data: solverData },
         );
-        const note = `満たしていない必須条件が${violations.length}件あります。`;
+        const note = `必須条件をすべて満たす仮の勤務表を作成できませんでした。満たしていない必須条件が${violations.length}件あります。`;
         const scheduleId = await persistSchedule(
           targetMonth,
           "provisional",
@@ -266,6 +304,7 @@ export async function runSolver(targetMonth, {
           objectiveValue: provisionalResult.objectiveValue,
           scheduleId,
           modelStats: provisionalModel.stats,
+          keptUserHardConstraints: false,
         };
       }
       model = provisionalModel;
