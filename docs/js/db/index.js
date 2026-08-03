@@ -60,6 +60,7 @@ export {
   getSchedules,
   latestSchedule,
   saveSchedule,
+  updateScheduleAssignments,
 } from "./schedules.js";
 export {
   BACKUP_SCHEMA_VERSION,

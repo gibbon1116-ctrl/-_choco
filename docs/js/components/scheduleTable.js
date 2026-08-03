@@ -16,52 +16,137 @@ function requestText(cell) {
   return "";
 }
 
-function createShiftCell(cell, date, { showRequests, showSkillBadges }) {
+function createShiftCell(cell, date, {
+  showRequests,
+  showSkillBadges,
+  employeeId,
+  staffName,
+  shiftOptions,
+  onEditCell,
+}) {
   const tableCell = element("td", `schedule-shift-cell ${weekendClass(date)}`.trim());
-  const requestLabel = showRequests ? requestText(cell) : "";
+  const renderContents = () => {
+    tableCell.replaceChildren();
+    const requestLabel = showRequests ? requestText(cell) : "";
 
-  if (!cell.is_work) {
+    if (!cell.is_work) {
+      if (requestLabel) {
+        const badge = element(
+          "div",
+          `schedule-shift-badge schedule-request-badge${cell.request_violated ? " is-violated" : ""}`,
+        );
+        badge.append(element("span", "schedule-shift-name", requestLabel));
+        tableCell.append(badge);
+      } else {
+        tableCell.append(element("span", "schedule-rest", "―"));
+      }
+      return;
+    }
+
+    const badge = element(
+      "div",
+      `schedule-shift-badge${showRequests && cell.request_violated ? " is-violated" : ""}`,
+    );
+    badge.style.backgroundColor = cell.color;
+    badge.append(element("span", "schedule-shift-name", cell.shift_name || cell.shift_code));
+    if (cell.start_time && cell.end_time) {
+      badge.append(element(
+        "span",
+        "schedule-shift-time",
+        `${cell.start_time}-${cell.end_time}`,
+      ));
+    }
     if (requestLabel) {
-      const badge = element(
-        "div",
-        `schedule-shift-badge schedule-request-badge${cell.request_violated ? " is-violated" : ""}`,
-      );
-      badge.append(element("span", "schedule-shift-name", requestLabel));
-      tableCell.append(badge);
-    } else {
-      tableCell.append(element("span", "schedule-rest", "―"));
+      badge.append(element(
+        "span",
+        `schedule-request-label${cell.request_violated ? " is-violated" : ""}`,
+        requestLabel,
+      ));
     }
-    return tableCell;
-  }
+    if (showSkillBadges && cell.skill_badges?.length) {
+      const skills = element("span", "schedule-skill-badges");
+      for (const label of cell.skill_badges) {
+        skills.append(element("span", "schedule-skill-badge", label));
+      }
+      badge.append(skills);
+    }
+    tableCell.append(badge);
+  };
 
-  const badge = element(
-    "div",
-    `schedule-shift-badge${showRequests && cell.request_violated ? " is-violated" : ""}`,
+  renderContents();
+  if (typeof onEditCell !== "function") return tableCell;
+
+  tableCell.classList.add("schedule-shift-cell--editable");
+  tableCell.tabIndex = 0;
+  tableCell.title = "ダブルクリックで勤務区分を変更";
+  tableCell.setAttribute(
+    "aria-label",
+    `${date.date} ${staffName} ${cell.shift_name || cell.shift_code}（ダブルクリックで勤務区分を変更）`,
   );
-  badge.style.backgroundColor = cell.color;
-  badge.append(element("span", "schedule-shift-name", cell.shift_name || cell.shift_code));
-  if (cell.start_time && cell.end_time) {
-    badge.append(element(
-      "span",
-      "schedule-shift-time",
-      `${cell.start_time}-${cell.end_time}`,
-    ));
-  }
-  if (requestLabel) {
-    badge.append(element(
-      "span",
-      `schedule-request-label${cell.request_violated ? " is-violated" : ""}`,
-      requestLabel,
-    ));
-  }
-  if (showSkillBadges && cell.skill_badges?.length) {
-    const skills = element("span", "schedule-skill-badges");
-    for (const label of cell.skill_badges) {
-      skills.append(element("span", "schedule-skill-badge", label));
+
+  const startEditing = () => {
+    if (tableCell.querySelector(".schedule-cell-editor")) return;
+    const originalShiftCode = String(cell.shift_code);
+    const select = element("select", "schedule-cell-editor");
+    for (const shift of shiftOptions) {
+      const option = element("option", "", shift.label);
+      option.value = shift.value;
+      select.append(option);
     }
-    badge.append(skills);
-  }
-  tableCell.append(badge);
+    select.value = originalShiftCode;
+    tableCell.replaceChildren(select);
+    select.focus();
+
+    let committing = false;
+    let finished = false;
+    const cancel = () => {
+      if (committing || finished) return;
+      finished = true;
+      renderContents();
+      tableCell.focus();
+    };
+    const commit = async () => {
+      if (committing || finished) return;
+      if (select.value === originalShiftCode) {
+        cancel();
+        return;
+      }
+      committing = true;
+      select.disabled = true;
+      try {
+        await onEditCell({
+          employee_id: employeeId,
+          date: date.date,
+          shift_code: select.value,
+        });
+        finished = true;
+      } catch {
+        committing = false;
+        finished = true;
+        renderContents();
+        tableCell.focus();
+      }
+    };
+
+    select.addEventListener("change", () => { void commit(); });
+    select.addEventListener("blur", () => {
+      if (select.value === originalShiftCode) cancel();
+      else void commit();
+    });
+    select.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancel();
+    });
+  };
+
+  tableCell.addEventListener("dblclick", startEditing);
+  tableCell.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    startEditing();
+  });
   return tableCell;
 }
 
@@ -89,8 +174,16 @@ export function createScheduleTable(viewModel, {
   showSkillBadges = true,
   filteredStaffIds = null,
   ariaLabel = "勤務表",
+  onEditCell = null,
 } = {}) {
   const dates = visibleDates ?? viewModel.dates;
+  const shiftOptions = Object.values(viewModel.shift_map).map((shift) => ({
+    value: shift.shift_code,
+    label: shift.shift_name,
+  }));
+  if (!shiftOptions.some((shift) => shift.value === "O")) {
+    shiftOptions.push({ value: "O", label: "休み" });
+  }
   const staffRows = filteredStaffIds
     ? viewModel.staff_rows.filter((row) => filteredStaffIds.has(row.employee_id))
     : viewModel.staff_rows;
@@ -170,7 +263,14 @@ export function createScheduleTable(viewModel, {
           skill_badges: [],
         },
         date,
-        { showRequests, showSkillBadges },
+        {
+          showRequests,
+          showSkillBadges,
+          employeeId: staff.employee_id,
+          staffName: staff.name,
+          shiftOptions,
+          onEditCell,
+        },
       ));
     }
     body.append(row);

@@ -434,3 +434,20 @@
     min-width: 130px;
   }
 }
+
+.schedule-shift-cell--editable {
+  cursor: pointer;
+}
+
+.schedule-shift-cell--editable:hover,
+.schedule-shift-cell--editable:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent) inset;
+}
+
+.schedule-cell-editor {
+  width: 100%;
+  padding: 0.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}

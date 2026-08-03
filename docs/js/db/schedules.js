@@ -1,6 +1,7 @@
 import {
   getAllFromIndex,
   getAllFromStore,
+  integerValue,
   requestToPromise,
   runTransaction,
   stringValue,
@@ -55,6 +56,28 @@ export function saveSchedule(
       transaction.objectStore("schedules").add(record),
     );
     return scheduleId;
+  });
+}
+
+export function updateScheduleAssignments(scheduleId, assignments) {
+  return runTransaction("schedules", "readwrite", async (transaction) => {
+    const store = transaction.objectStore("schedules");
+    const record = await requestToPromise(store.get(integerValue(scheduleId)));
+    if (!record) {
+      throw new Error("対象の勤務表が見つかりませんでした。");
+    }
+
+    const updatedRecord = {
+      ...record,
+      assignments: Array.from(assignments, (assignment) => ({
+        employee_id: stringValue(assignment.employee_id),
+        date: stringValue(assignment.date),
+        shift_code: stringValue(assignment.shift_code),
+      })),
+      edited_at: localIsoSeconds(),
+    };
+    await requestToPromise(store.put(updatedRecord));
+    return updatedRecord;
   });
 }
 

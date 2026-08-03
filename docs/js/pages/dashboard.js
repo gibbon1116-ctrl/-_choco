@@ -3,6 +3,7 @@ import {
   getAllShiftTypes,
   getSettings,
   latestSchedule,
+  updateScheduleAssignments,
 } from "../db/index.js";
 import { createScheduleTable, createShiftLegend } from "../components/scheduleTable.js";
 import { monthLabel } from "../components/monthSelector.js";
@@ -25,6 +26,7 @@ import {
   createLoading,
   createPageHeading,
   element,
+  showAlert,
 } from "./pageUtils.js";
 
 const pageState = new Map();
@@ -196,8 +198,8 @@ async function createDetails(targetMonth, assignments, settings, employees, shif
 
 async function renderSchedule(section, targetMonth, schedule, settings, employees, shiftTypes, ui, rerender) {
   const assignments = schedule.assignments ?? [];
-  if (schedule.status === "provisional") {
-    const violations = await hardRuleViolations(targetMonth, assignments);
+  const violations = await hardRuleViolations(targetMonth, assignments);
+  if (schedule.status === "provisional" || violations.length) {
     const visibleLimit = 15;
     const messages = violations.slice(0, visibleLimit).map(
       (row) => `${row.category}：${row.message}`,
@@ -206,8 +208,20 @@ async function renderSchedule(section, targetMonth, schedule, settings, employee
       messages.push(`他${violations.length - visibleLimit}件あります。`);
     }
     const provisionalNotice = element("section", "");
+    provisionalNotice.append(element(
+      "h2",
+      "",
+      schedule.status === "provisional"
+        ? "仮の勤務表：満たしていない条件"
+        : "満たしていない条件",
+    ));
+    if (schedule.status === "provisional") {
+      const note = String(schedule.note ?? "").trim();
+      if (note) {
+        provisionalNotice.append(element("p", "crud-form__caption", note));
+      }
+    }
     provisionalNotice.append(
-      element("h2", "", "仮の勤務表：満たしていない条件"),
       createAlert(
         messages.length ? messages : "確認対象の必須条件違反は検出されませんでした。",
         "warning",
@@ -216,6 +230,8 @@ async function renderSchedule(section, targetMonth, schedule, settings, employee
     section.append(provisionalNotice);
   }
   const viewModel = await buildScheduleViewModel(targetMonth, assignments);
+  const editMessageRegion = element("div", "");
+  editMessageRegion.setAttribute("aria-live", "polite");
   const controls = element("div", "dashboard-schedule-controls");
   const modes = element("div", "dashboard-view-modes");
   for (const [value, label] of [["week", "週表示"], ["half", "半月表示"], ["month", "月表示"]]) {
@@ -268,7 +284,7 @@ async function renderSchedule(section, targetMonth, schedule, settings, employee
     createToggle("人数集計", ui.showSummary, (value) => { ui.showSummary = value; rerender(); }),
     createToggle("スキル", ui.showSkills, (value) => { ui.showSkills = value; rerender(); }),
   );
-  section.append(controls, filterRow);
+  section.append(editMessageRegion, controls, filterRow);
 
   let filteredStaffIds = null;
   if (ui.employeeId !== "all") {
@@ -286,6 +302,29 @@ async function renderSchedule(section, targetMonth, schedule, settings, employee
       showRequests: ui.showRequests,
       showSkillBadges: ui.showSkills,
       filteredStaffIds,
+      onEditCell: async ({ employee_id, date, shift_code }) => {
+        const next = assignments.map((assignment) => ({ ...assignment }));
+        const target = next.find((assignment) => (
+          String(assignment.employee_id) === String(employee_id)
+          && String(assignment.date) === String(date)
+        ));
+        if (target) {
+          target.shift_code = shift_code;
+        } else {
+          next.push({ employee_id, date, shift_code });
+        }
+
+        try {
+          await updateScheduleAssignments(schedule.schedule_id, next);
+          rerender();
+        } catch (error) {
+          showAlert(
+            editMessageRegion,
+            error.message || "勤務区分を変更できませんでした。",
+          );
+          throw error;
+        }
+      },
     }),
     createShiftLegend(viewModel.shift_map),
   );
