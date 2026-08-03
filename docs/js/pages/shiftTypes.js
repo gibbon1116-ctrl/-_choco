@@ -1,4 +1,5 @@
 import {
+  countShiftTypeUsage,
   deleteShiftType,
   getAllShiftTypes,
   upsertShiftType,
@@ -99,17 +100,45 @@ function createShiftTable(shiftTypes, editorHost, container, noticeRegion) {
     });
     deleteButton.dataset.action = "delete-shift";
     deleteButton.dataset.shiftCode = shiftType.shift_code;
+    if (String(shiftType.shift_code).trim().toUpperCase() === "O") {
+      deleteButton.disabled = true;
+      deleteButton.title = "休み区分 O は削除できません。";
+    }
     deleteButton.addEventListener("click", async () => {
-      const confirmed = globalThis.confirm?.(
-        `${shiftType.shift_name}（${shiftType.shift_code}）を削除しますか？`,
-      ) ?? true;
-      if (!confirmed) return;
       deleteButton.disabled = true;
       try {
-        await deleteShiftType(shiftType.shift_code);
+        const usage = await countShiftTypeUsage(shiftType.shift_code);
+        const usageLines = [
+          [usage.requirements, "必要人数"],
+          [usage.roleRequirements, "役割別必要人数"],
+          [usage.requests, "希望休・勤務希望"],
+          [
+            usage.scheduleAssignments,
+            "作成済み勤務表の割り当て",
+            "（休みに変更されます）",
+          ],
+        ]
+          .filter(([count]) => count > 0)
+          .map(([count, label, note = ""]) => `・${label} ${count}件${note}`);
+        const confirmationMessage = usage.total === 0
+          ? `${shiftType.shift_name}（${shiftType.shift_code}）を削除しますか？`
+          : `${shiftType.shift_name}（${shiftType.shift_code}）は次のデータで使用中です。\n\n${usageLines.join("\n")}\n\n勤務区分を削除すると、これらもまとめて削除・変更されます。\n元に戻せません。削除しますか？`;
+        const confirmed = globalThis.confirm?.(confirmationMessage) ?? true;
+        if (!confirmed) {
+          deleteButton.disabled = false;
+          return;
+        }
+
+        if (usage.total === 0) {
+          await deleteShiftType(shiftType.shift_code);
+        } else {
+          await deleteShiftType(shiftType.shift_code, { cascade: true });
+        }
         await renderShiftTypesPage(container, {
           type: "success",
-          message: "勤務区分を削除しました。",
+          message: usage.total === 0
+            ? "勤務区分を削除しました。"
+            : `勤務区分を削除し、関連する${usage.total}件のデータを整理しました。`,
         });
       } catch (error) {
         deleteButton.disabled = false;

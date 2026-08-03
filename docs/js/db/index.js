@@ -38,6 +38,7 @@ export {
   upsertRoleRequirement,
 } from "./roleRequirements.js";
 export {
+  countShiftTypeUsage,
   deleteShiftType,
   getAllShiftTypes,
   upsertShiftType,
